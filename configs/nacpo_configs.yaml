@@ -1,0 +1,103 @@
+model:
+  name: "Qwen/Qwen3.5-9B"
+  max_length: 2048
+
+dataset:
+  name: "openbmb/UltraFeedback"
+  split: "train"
+  eval_split: "test"
+  max_train_samples: 50000
+
+noise_schedules:
+  uniform:
+    type: "uniform"
+    noise_rate: 0.15
+  ascending:
+    type: "ascending"
+    start_rate: 0.0
+    end_rate: 0.3
+  descending:
+    type: "descending"
+    start_rate: 0.3
+    end_rate: 0.0
+  adversarial:
+    type: "adversarial"
+    base_rate: 0.1
+    adversarial_rate: 0.4
+    adversarial_fraction: 0.2
+
+noise_types:
+  random_flip:
+    type: "random_flip"
+  confidence_weighted:
+    type: "confidence_weighted"
+    temperature: 1.0
+  semantic_swap:
+    type: "semantic_swap"
+    embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+    top_k_similar: 5
+
+training:
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  learning_rate: 5.0e-7
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  bf16: true
+  logging_steps: 10
+  save_steps: 500
+  max_length: 2048
+  max_prompt_length: 1024
+  beta: 0.1
+  loss_type: "sigmoid"
+
+deepspeed:
+  stage: 3
+  offload_optimizer: true
+  offload_param: false
+
+eval:
+  mt_bench:
+    judge_model: "Qwen/Qwen3.5-27B"
+    num_turns: 2
+  alpaca_eval:
+    reference_model: "gpt-4"
+    max_samples: 805
+  truthfulqa:
+    split: "validation"
+    max_samples: 817
+
+sweep:
+  combinations:
+    - schedule: "uniform"
+      noise_type: "random_flip"
+    - schedule: "uniform"
+      noise_type: "confidence_weighted"
+    - schedule: "uniform"
+      noise_type: "semantic_swap"
+    - schedule: "ascending"
+      noise_type: "random_flip"
+    - schedule: "ascending"
+      noise_type: "confidence_weighted"
+    - schedule: "ascending"
+      noise_type: "semantic_swap"
+    - schedule: "descending"
+      noise_type: "random_flip"
+    - schedule: "descending"
+      noise_type: "confidence_weighted"
+    - schedule: "descending"
+      noise_type: "semantic_swap"
+    - schedule: "adversarial"
+      noise_type: "random_flip"
+    - schedule: "adversarial"
+      noise_type: "confidence_weighted"
+    - schedule: "adversarial"
+      noise_type: "semantic_swap"
+  seeds: [42, 43]
+  baseline_no_noise: true
+
+output:
+  base_dir: "./results"
+  checkpoint_dir: "./checkpoints"
