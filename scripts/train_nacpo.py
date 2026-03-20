@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-NaCPO Training: DPO with noise injection.
-4 noise schedules x 3 noise types = 12 configurations + 1 baseline.
-Model: Qwen/Qwen3.5-9B. Data: UltraFeedback. Uses TRL DPOTrainer.
+NaCPO Training: DPO with noise-as-curriculum injection.
+
+Base model: Qwen/Qwen3.5-9B
+Dataset: UltraFeedback (or Anthropic HH) preferences
+Uses TRL DPOTrainer with custom NoisyCurriculumCollator.
+Accepts CLI args: noise_type, noise_schedule, noise_rate, warmup_steps.
+Saves checkpoints + training metrics.
 """
 
 import argparse
 import json
 import logging
 import os
+import random
 import sys
 from pathlib import Path
 
 import torch
 import yaml
+from datasets import Dataset as HFDataset
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import DPOConfig, DPOTrainer
@@ -21,6 +27,8 @@ from trl import DPOConfig, DPOTrainer
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.noise_curriculum import (
     build_schedule, build_noise_injector, NoisyCurriculumCollator,
+    NoiseSchedule, UniformSchedule, AscendingSchedule, DescendingSchedule,
+    AdversarialSchedule,
 )
 
 logging.basicConfig(
@@ -33,15 +41,28 @@ logger = logging.getLogger("train_nacpo")
 def parse_args():
     parser = argparse.ArgumentParser(description="NaCPO: Noise-as-Curriculum DPO Training")
     parser.add_argument("--config", type=str, default="configs/nacpo_configs.yaml")
-    parser.add_argument("--schedule", type=str, required=True,
-                        choices=["uniform", "ascending", "descending", "adversarial", "none"])
+    parser.add_argument("--model_name", type=str, default=None,
+                        help="Override model name (default: from config)")
+    parser.add_argument("--dataset_name", type=str, default=None,
+                        help="Override dataset (default: from config)")
+
     parser.add_argument("--noise_type", type=str, required=True,
                         choices=["random_flip", "confidence_weighted", "semantic_swap", "none"])
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--noise_schedule", type=str, required=True,
+                        choices=["uniform", "ascending", "descending", "adversarial", "none"])
+    parser.add_argument("--noise_rate", type=float, default=None,
+                        help="Base noise rate (overrides config)")
+    parser.add_argument("--warmup_steps", type=int, default=0,
+                        help="Steps before noise injection begins")
+
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--num_train_epochs", type=int, default=None)
     parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--per_device_train_batch_size", type=int, default=None)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=None)
     parser.add_argument("--max_train_samples", type=int, default=None)
+    parser.add_argument("--beta", type=float, default=None, help="DPO beta parameter")
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--local_rank", type=int, default=-1)
     return parser.parse_args()
 
@@ -51,51 +72,55 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def prepare_ultrafeedback(dataset, max_samples=None):
-    """Convert UltraFeedback to DPO format with prompt/chosen/rejected."""
+def prepare_preference_data(dataset_name, split, max_samples=None):
+    """Load and prepare preference pairs from UltraFeedback or Anthropic HH."""
+    logger.info(f"Loading dataset: {dataset_name} split={split}")
+    raw = load_dataset(dataset_name, split=split)
 
-    def process_example(example):
-        prompt = example.get("instruction", example.get("prompt", ""))
-        completions = example.get("completions", [])
+    processed = []
+    for ex in raw:
+        prompt = ex.get("instruction", ex.get("prompt", ""))
+        completions = ex.get("completions", [])
 
         if len(completions) >= 2:
-            sorted_completions = sorted(
+            sorted_c = sorted(
                 completions,
                 key=lambda x: x.get("overall_score", x.get("score", 0)),
                 reverse=True,
             )
-            chosen = sorted_completions[0].get("response", "")
-            rejected = sorted_completions[-1].get("response", "")
-        elif "chosen" in example and "rejected" in example:
-            chosen = example["chosen"]
-            rejected = example["rejected"]
+            chosen = sorted_c[0].get("response", "")
+            rejected = sorted_c[-1].get("response", "")
+        elif "chosen" in ex and "rejected" in ex:
+            chosen = ex["chosen"]
+            rejected = ex["rejected"]
+            if not prompt:
+                prompt = ex.get("prompt", ex.get("question", ""))
         else:
-            return None
+            continue
 
         if not chosen or not rejected or chosen == rejected:
-            return None
+            continue
+        if not prompt:
+            continue
 
-        return {"prompt": prompt, "chosen": chosen, "rejected": rejected}
-
-    processed = []
-    for ex in dataset:
-        result = process_example(ex)
-        if result:
-            processed.append(result)
+        processed.append({"prompt": prompt, "chosen": chosen, "rejected": rejected})
         if max_samples and len(processed) >= max_samples:
             break
 
-    from datasets import Dataset as HFDataset
+    logger.info(f"Prepared {len(processed)} preference pairs")
     return HFDataset.from_list(processed)
 
 
-class NoiseLoggingCallback(TrainerCallback):
-    """Log noise injection statistics during training."""
+class NaCPOCallback(TrainerCallback):
+    """Log noise injection statistics and handle warmup."""
 
-    def __init__(self, collator: NoisyCurriculumCollator):
+    def __init__(self, collator: NoisyCurriculumCollator, warmup_steps: int = 0):
         self.collator = collator
+        self.warmup_steps = warmup_steps
+        self.global_step = 0
 
     def on_step_end(self, args, state, control, **kwargs):
+        self.global_step += 1
         self.collator.step()
 
     def on_log(self, args, state, control, logs=None, **kwargs):
@@ -104,23 +129,61 @@ class NoiseLoggingCallback(TrainerCallback):
         logs["noise/current_rate"] = self.collator.current_noise_rate
         logs["noise/observed_flip_rate"] = self.collator.observed_flip_rate
         logs["noise/progress"] = self.collator.progress
+        logs["noise/warmup_active"] = int(self.global_step < self.warmup_steps)
+
+
+def inject_noise_into_dataset(dataset, schedule, injector, noise_type, seed, warmup_fraction=0.0):
+    """Pre-inject noise into the full dataset according to schedule."""
+    rng = random.Random(seed)
+    noisy_data = []
+    n_flipped = 0
+
+    for i, ex in enumerate(dataset):
+        progress = i / max(len(dataset), 1)
+
+        if progress < warmup_fraction:
+            noisy_data.append(ex)
+            continue
+
+        adjusted_progress = (progress - warmup_fraction) / max(1.0 - warmup_fraction, 1e-8)
+        noise_rate = schedule.get_rate(min(adjusted_progress, 1.0))
+
+        chosen, rejected, flipped = injector.inject(
+            ex["chosen"], ex["rejected"], noise_rate, rng,
+        )
+        if flipped:
+            n_flipped += 1
+
+        noisy_data.append({
+            "prompt": ex["prompt"],
+            "chosen": chosen,
+            "rejected": rejected,
+        })
+
+    flip_rate = n_flipped / max(len(dataset), 1)
+    logger.info(f"Noise injection: {n_flipped}/{len(dataset)} flipped ({flip_rate:.2%})")
+    return HFDataset.from_list(noisy_data), flip_rate
 
 
 def main():
     args = parse_args()
     cfg = load_config(args.config)
-
     os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
-    is_baseline = args.schedule == "none" and args.noise_type == "none"
-    tag = f"{'baseline' if is_baseline else f'{args.schedule}_{args.noise_type}'}_seed{args.seed}"
+    is_baseline = args.noise_schedule == "none" and args.noise_type == "none"
+    tag = f"{'baseline' if is_baseline else f'{args.noise_schedule}_{args.noise_type}'}"
+    if args.noise_rate is not None:
+        tag += f"_nr{args.noise_rate}"
+    tag += f"_seed{args.seed}"
+
     output_dir = args.output_dir or os.path.join(cfg["output"]["checkpoint_dir"], tag)
     os.makedirs(output_dir, exist_ok=True)
 
-    logger.info(f"NaCPO Training: schedule={args.schedule}, noise_type={args.noise_type}")
+    logger.info(f"NaCPO Training: schedule={args.noise_schedule}, type={args.noise_type}, "
+                f"rate={args.noise_rate}, warmup={args.warmup_steps}")
     logger.info(f"Output: {output_dir}")
 
-    model_name = cfg["model"]["name"]
+    model_name = args.model_name or cfg["model"]["name"]
     logger.info(f"Loading model: {model_name}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
@@ -128,47 +191,60 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True,
+        model_name, torch_dtype=torch.bfloat16, trust_remote_code=True,
     )
 
-    logger.info("Loading UltraFeedback dataset...")
+    dataset_name = args.dataset_name or cfg["dataset"]["name"]
     max_samples = args.max_train_samples or cfg["dataset"].get("max_train_samples")
-    raw_dataset = load_dataset(cfg["dataset"]["name"], split=cfg["dataset"]["split"])
-    dataset = prepare_ultrafeedback(raw_dataset, max_samples=max_samples)
-    logger.info(f"Prepared {len(dataset)} training pairs")
+    dataset = prepare_preference_data(dataset_name, cfg["dataset"]["split"], max_samples)
 
-    # Build noise components
-    collator = None
+    tcfg = cfg["training"]
     callbacks = []
+    actual_flip_rate = 0.0
 
     if not is_baseline:
-        schedule_cfg = cfg["noise_schedules"][args.schedule]
-        noise_cfg = cfg["noise_types"][args.noise_type]
+        schedule_cfg = dict(cfg["noise_schedules"][args.noise_schedule])
+        if args.noise_rate is not None:
+            if args.noise_schedule == "uniform":
+                schedule_cfg["noise_rate"] = args.noise_rate
+            elif args.noise_schedule in ("ascending", "descending"):
+                schedule_cfg["end_rate"] = args.noise_rate
+            elif args.noise_schedule == "adversarial":
+                schedule_cfg["adversarial_rate"] = args.noise_rate
+
         schedule = build_schedule(schedule_cfg)
+        noise_cfg = dict(cfg["noise_types"][args.noise_type])
         injector = build_noise_injector(noise_cfg)
 
         if args.noise_type == "semantic_swap":
             logger.info("Building semantic swap response pool...")
-            response_pool = [ex["chosen"] for ex in dataset] + [ex["rejected"] for ex in dataset]
-            injector.build_pool(response_pool[:5000])
+            pool = [ex["chosen"] for ex in dataset] + [ex["rejected"] for ex in dataset]
+            injector.build_pool(pool[:5000])
+
+        warmup_fraction = args.warmup_steps / max(len(dataset), 1) if args.warmup_steps > 0 else 0.0
+
+        dataset, actual_flip_rate = inject_noise_into_dataset(
+            dataset, schedule, injector, args.noise_type, args.seed, warmup_fraction,
+        )
 
         collator = NoisyCurriculumCollator(
-            tokenizer=tokenizer,
-            schedule=schedule,
-            injector=injector,
-            max_length=cfg["training"]["max_length"],
-            max_prompt_length=cfg["training"]["max_prompt_length"],
+            tokenizer=tokenizer, schedule=schedule, injector=injector,
+            max_length=tcfg["max_length"], max_prompt_length=tcfg["max_prompt_length"],
             seed=args.seed,
         )
-        callbacks.append(NoiseLoggingCallback(collator))
+        total_steps = (
+            len(dataset)
+            // ((args.per_device_train_batch_size or tcfg["per_device_train_batch_size"])
+                * (args.gradient_accumulation_steps or tcfg["gradient_accumulation_steps"]))
+            * (args.num_train_epochs or tcfg["num_train_epochs"])
+        )
+        collator.set_training_steps(total_steps)
+        callbacks.append(NaCPOCallback(collator, args.warmup_steps))
 
-    tcfg = cfg["training"]
     training_config = DPOConfig(
         output_dir=output_dir,
-        per_device_train_batch_size=tcfg["per_device_train_batch_size"],
-        gradient_accumulation_steps=tcfg["gradient_accumulation_steps"],
+        per_device_train_batch_size=args.per_device_train_batch_size or tcfg["per_device_train_batch_size"],
+        gradient_accumulation_steps=args.gradient_accumulation_steps or tcfg["gradient_accumulation_steps"],
         num_train_epochs=args.num_train_epochs or tcfg["num_train_epochs"],
         learning_rate=args.learning_rate or tcfg["learning_rate"],
         warmup_ratio=tcfg["warmup_ratio"],
@@ -177,42 +253,13 @@ def main():
         bf16=tcfg["bf16"],
         logging_steps=tcfg["logging_steps"],
         save_steps=tcfg["save_steps"],
-        beta=tcfg["beta"],
+        beta=args.beta or tcfg["beta"],
         loss_type=tcfg["loss_type"],
         max_length=tcfg["max_length"],
         max_prompt_length=tcfg["max_prompt_length"],
         seed=args.seed,
         report_to="none",
-        deepspeed=None,
     )
-
-    if collator:
-        total_steps = (
-            len(dataset) // (tcfg["per_device_train_batch_size"] * tcfg["gradient_accumulation_steps"])
-            * (args.num_train_epochs or tcfg["num_train_epochs"])
-        )
-        collator.set_training_steps(total_steps)
-
-        # Inject noise into dataset before training
-        logger.info("Pre-injecting noise into dataset (collator will track progress)...")
-        noisy_data = []
-        import random
-        rng = random.Random(args.seed)
-        for i, ex in enumerate(dataset):
-            progress = i / len(dataset)
-            noise_rate = schedule.get_rate(progress)
-            chosen, rejected, flipped = injector.inject(
-                ex["chosen"], ex["rejected"], noise_rate, rng,
-            )
-            noisy_data.append({
-                "prompt": ex["prompt"],
-                "chosen": chosen,
-                "rejected": rejected,
-            })
-
-        from datasets import Dataset as HFDataset
-        dataset = HFDataset.from_list(noisy_data)
-        logger.info(f"Noise injection complete. Flip rate: {collator.observed_flip_rate:.4f}")
 
     trainer = DPOTrainer(
         model=model,
@@ -229,12 +276,18 @@ def main():
     tokenizer.save_pretrained(output_dir)
 
     metrics = {
-        "schedule": args.schedule,
+        "noise_schedule": args.noise_schedule,
         "noise_type": args.noise_type,
+        "noise_rate": args.noise_rate,
+        "warmup_steps": args.warmup_steps,
         "seed": args.seed,
         "is_baseline": is_baseline,
+        "actual_flip_rate": actual_flip_rate,
         "train_loss": train_result.metrics.get("train_loss"),
         "train_runtime": train_result.metrics.get("train_runtime"),
+        "model": model_name,
+        "dataset": dataset_name,
+        "num_samples": len(dataset),
     }
 
     with open(os.path.join(output_dir, "train_metrics.json"), "w") as f:
