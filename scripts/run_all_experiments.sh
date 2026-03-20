@@ -2,15 +2,16 @@
 # ============================================================================
 # NaCPO (Noise-as-Curriculum Preference Optimization) — Full Experiment Pipeline
 # prepare_data → dpo_baselines → nacpo_sweep → eval → noise_analysis → 27B validation → figures
-# Hardware: 8x A100-80GB
+# Hardware: 4–8× A100-80GB (auto-detected)
 # ============================================================================
 set -euo pipefail
 
-export HF_ENDPOINT="https://hf-mirror.com"
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=gpu_utils.sh
+source "${SCRIPT_DIR}/gpu_utils.sh"
+auto_setup
+
 CONFIG="${PROJECT_DIR}/configs/nacpo_configs.yaml"
 
 CHECKPOINT_DIR="${PROJECT_DIR}/checkpoints"
@@ -22,6 +23,11 @@ mkdir -p "$CHECKPOINT_DIR" "$RESULTS_DIR" "$ANALYSIS_DIR" "$LOG_DIR"
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $1"; }
+
+log "========================================="
+log " NaCPO Experiment Pipeline"
+log " GPUs:  ${NUM_GPUS} (CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES})"
+log "========================================="
 
 # ============================================================================
 # Stage 1: Prepare Data (verify dataset access)
@@ -151,7 +157,6 @@ if os.path.exists(ranking_file):
         std = data.get('truthfulqa_std', 0) or 0
         print(f'  {i+1:2d}. {name:45s} TQA={tqa:.4f}±{std:.4f} MT={mt:.2f}')
 else:
-    # Fall back to individual results
     results = []
     for f in sorted(glob.glob(os.path.join(results_dir, 'eval_alignment_*.json'))):
         tag = os.path.basename(f).replace('eval_alignment_', '').replace('.json', '')
