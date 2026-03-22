@@ -256,7 +256,6 @@ def main():
         beta=args.beta or tcfg["beta"],
         loss_type=tcfg["loss_type"],
         max_length=tcfg["max_length"],
-        max_prompt_length=tcfg["max_prompt_length"],
         seed=args.seed,
         report_to="none",
     )
