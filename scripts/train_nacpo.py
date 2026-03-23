@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.noise_curriculum import (
     build_schedule, build_noise_injector, NoisyCurriculumCollator,
     NoiseSchedule, UniformSchedule, AscendingSchedule, DescendingSchedule,
-    AdversarialSchedule,
+    CosineSchedule, CyclicSchedule, AdversarialSchedule,
 )
 from src.qwen35_compat import (
     apply_qwen35_text_only_patch, patch_model_instance, ClearRopeDeltasCallback,
@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument("--noise_type", type=str, required=True,
                         choices=["random_flip", "confidence_weighted", "semantic_swap", "none"])
     parser.add_argument("--noise_schedule", type=str, required=True,
-                        choices=["uniform", "ascending", "descending", "adversarial", "none"])
+                        choices=["uniform", "ascending", "descending", "cosine", "cyclic", "adversarial", "none"])
     parser.add_argument("--noise_rate", type=float, default=None,
                         help="Base noise rate (overrides config)")
     parser.add_argument("--warmup_steps", type=int, default=0,
@@ -79,10 +79,21 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def prepare_preference_data(dataset_name, split, max_samples=None):
-    """Load and prepare preference pairs from UltraFeedback or Anthropic HH."""
+def prepare_preference_data(dataset_name, split, max_samples=None, tokenizer=None):
+    """Load and prepare preference pairs from UltraFeedback or Anthropic HH.
+
+    Returns data in the conversational format expected by TRL DPOTrainer:
+    each row has 'prompt', 'chosen', 'rejected' as chat-formatted lists
+    when a tokenizer with chat_template is available, or as plain strings.
+    """
     logger.info(f"Loading dataset: {dataset_name} split={split}")
     raw = load_dataset(dataset_name, split=split)
+
+    use_chat = (
+        tokenizer is not None
+        and hasattr(tokenizer, "chat_template")
+        and tokenizer.chat_template is not None
+    )
 
     processed = []
     for ex in raw:
@@ -110,11 +121,24 @@ def prepare_preference_data(dataset_name, split, max_samples=None):
         if not prompt:
             continue
 
-        processed.append({"prompt": prompt, "chosen": chosen, "rejected": rejected})
+        if use_chat:
+            prompt_msgs = [{"role": "user", "content": prompt}]
+            chosen_msgs = [{"role": "user", "content": prompt},
+                           {"role": "assistant", "content": chosen}]
+            rejected_msgs = [{"role": "user", "content": prompt},
+                             {"role": "assistant", "content": rejected}]
+            processed.append({
+                "prompt": prompt_msgs,
+                "chosen": chosen_msgs,
+                "rejected": rejected_msgs,
+            })
+        else:
+            processed.append({"prompt": prompt, "chosen": chosen, "rejected": rejected})
+
         if max_samples and len(processed) >= max_samples:
             break
 
-    logger.info(f"Prepared {len(processed)} preference pairs")
+    logger.info(f"Prepared {len(processed)} preference pairs (chat_format={use_chat})")
     return HFDataset.from_list(processed)
 
 
@@ -203,20 +227,26 @@ def main():
 
     dataset_name = args.dataset_name or cfg["dataset"]["name"]
     max_samples = args.max_train_samples or cfg["dataset"].get("max_train_samples")
-    dataset = prepare_preference_data(dataset_name, cfg["dataset"]["split"], max_samples)
+    dataset = prepare_preference_data(dataset_name, cfg["dataset"]["split"], max_samples, tokenizer)
 
     tcfg = cfg["training"]
     callbacks = []
     actual_flip_rate = 0.0
 
     if not is_baseline:
-        schedule_cfg = dict(cfg["noise_schedules"][args.noise_schedule])
+        sched_key = args.noise_schedule
+        if sched_key in cfg["noise_schedules"]:
+            schedule_cfg = dict(cfg["noise_schedules"][sched_key])
+        else:
+            schedule_cfg = {"type": sched_key}
         if args.noise_rate is not None:
-            if args.noise_schedule == "uniform":
+            if sched_key == "uniform":
                 schedule_cfg["noise_rate"] = args.noise_rate
-            elif args.noise_schedule in ("ascending", "descending"):
+            elif sched_key in ("ascending", "descending"):
                 schedule_cfg["end_rate"] = args.noise_rate
-            elif args.noise_schedule == "adversarial":
+            elif sched_key in ("cosine", "cyclic"):
+                schedule_cfg["peak_rate"] = args.noise_rate
+            elif sched_key == "adversarial":
                 schedule_cfg["adversarial_rate"] = args.noise_rate
 
         schedule = build_schedule(schedule_cfg)

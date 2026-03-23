@@ -61,6 +61,29 @@ class DescendingSchedule(NoiseSchedule):
         return self.start_rate + (self.end_rate - self.start_rate) * progress
 
 
+class CosineSchedule(NoiseSchedule):
+    """Cosine annealing: starts at peak noise and smoothly decays to near zero."""
+
+    def __init__(self, peak_rate: float = 0.3):
+        self.peak_rate = peak_rate
+
+    def get_rate(self, progress: float) -> float:
+        import math
+        return self.peak_rate * (1 + math.cos(math.pi * progress)) / 2
+
+
+class CyclicSchedule(NoiseSchedule):
+    """Sinusoidal cycling with configurable period count."""
+
+    def __init__(self, peak_rate: float = 0.2, num_cycles: int = 5):
+        self.peak_rate = peak_rate
+        self.num_cycles = num_cycles
+
+    def get_rate(self, progress: float) -> float:
+        import math
+        return self.peak_rate * abs(math.sin(math.pi * self.num_cycles * progress))
+
+
 class AdversarialSchedule(NoiseSchedule):
     """Low base noise with periodic high-noise adversarial bursts."""
 
@@ -86,6 +109,10 @@ def build_schedule(config: dict) -> NoiseSchedule:
         return AscendingSchedule(config.get("start_rate", 0.0), config.get("end_rate", 0.3))
     elif stype == "descending":
         return DescendingSchedule(config.get("start_rate", 0.3), config.get("end_rate", 0.0))
+    elif stype == "cosine":
+        return CosineSchedule(config.get("peak_rate", 0.3))
+    elif stype == "cyclic":
+        return CyclicSchedule(config.get("peak_rate", 0.2), config.get("num_cycles", 5))
     elif stype == "adversarial":
         return AdversarialSchedule(
             config.get("base_rate", 0.1),

@@ -20,6 +20,13 @@ noise_schedules:
     type: "descending"
     start_rate: 0.3
     end_rate: 0.0
+  cosine:
+    type: "cosine"
+    peak_rate: 0.3
+  cyclic:
+    type: "cyclic"
+    peak_rate: 0.2
+    num_cycles: 5
   adversarial:
     type: "adversarial"
     base_rate: 0.1
@@ -91,6 +98,18 @@ sweep:
     - schedule: "descending"
       noise_type: "confidence_weighted"
     - schedule: "descending"
+      noise_type: "semantic_swap"
+    - schedule: "cosine"
+      noise_type: "random_flip"
+    - schedule: "cosine"
+      noise_type: "confidence_weighted"
+    - schedule: "cosine"
+      noise_type: "semantic_swap"
+    - schedule: "cyclic"
+      noise_type: "random_flip"
+    - schedule: "cyclic"
+      noise_type: "confidence_weighted"
+    - schedule: "cyclic"
       noise_type: "semantic_swap"
     - schedule: "adversarial"
       noise_type: "random_flip"

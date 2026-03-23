@@ -25,15 +25,15 @@ LOG_DIR="${PROJECT_DIR}/logs"
 
 mkdir -p "$CHECKPOINT_DIR" "$RESULTS_DIR" "$LOG_DIR"
 
+timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
+log() { echo "[$(timestamp)] $1"; }
+
 NUM_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
 NUM_GPUS=${NUM_GPUS:-1}
 log "Detected $NUM_GPUS GPU(s)"
 
-timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
-log() { echo "[$(timestamp)] $1"; }
-
 NOISE_TYPES=(random_flip confidence_weighted semantic_swap)
-SCHEDULES=(uniform ascending descending adversarial)
+SCHEDULES=(uniform ascending descending cosine cyclic adversarial)
 NOISE_RATES=(0.05 0.1 0.2)
 SEEDS=(42 43)
 

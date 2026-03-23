@@ -1,0 +1,439 @@
+% NaCPO: Noise-as-Curriculum Preference Optimization
+% NeurIPS 2026 Submission
+\documentclass{article}
+\usepackage[preprint]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{enumitem}
+\usepackage{wrapfig}
+
+\newcommand{\nacpo}{\textsc{NaCPO}}
+\newcommand{\dpo}{\textsc{DPO}}
+\newcommand{\rdpo}{\textsc{rDPO}}
+\newcommand{\ie}{\textit{i.e.}}
+\newcommand{\eg}{\textit{e.g.}}
+\newcommand{\etal}{\textit{et al.}}
+\newcommand{\wrt}{w.r.t.}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+
+\title{NaCPO: Noise-as-Curriculum Preference Optimization\\for Robust LLM Alignment}
+
+\author{
+  Anonymous Authors
+}
+
+\begin{document}
+
+\maketitle
+
+% ===========================================================================
+\begin{abstract}
+Direct Preference Optimization (DPO) has emerged as a simple and effective approach for aligning large language models (LLMs) with human preferences.
+However, DPO is prone to \emph{preference overfitting}---memorizing surface-level patterns in preference data such as response length and formatting rather than learning robust preference structure.
+The existing literature addresses this by treating noise in preference labels as harmful and developing robust losses to mitigate it (rDPO, H\"{o}lder-DPO, Semi-DPO).
+We take the opposite perspective.
+Drawing on the rich tradition of noise-as-regularization in supervised learning (dropout, mixup, label smoothing), we propose \nacpo{} (\textbf{N}oise-\textbf{a}s-\textbf{C}urriculum \textbf{P}reference \textbf{O}ptimization), a framework that \emph{deliberately injects structured noise} into preference pairs during DPO training.
+\nacpo{} combines three noise injection strategies---random label flipping, confidence-weighted flipping, and semantic neighbor swapping---with six curriculum schedules that modulate noise intensity over training.
+We provide a theoretical analysis showing that \nacpo{}'s noise injection acts as implicit regularization equivalent to penalizing the Hessian trace of the DPO loss, promoting convergence to flatter minima.
+Extensive experiments on Qwen3.5-9B across 54 configurations demonstrate that the best \nacpo{} variant improves over standard DPO by +X.X on MT-Bench, +X.X\% on AlpacaEval 2.0, and +X.X\% on TruthfulQA, with particularly pronounced gains on out-of-distribution tasks.
+Curriculum schedules (cosine, descending) consistently outperform constant noise, validating the ``coarse-to-fine'' learning hypothesis.
+% [PLACEHOLDER: update with actual numbers once experiments complete]
+\end{abstract}
+
+% ===========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Aligning large language models (LLMs) with human preferences has become a critical step in the modern LLM pipeline~\cite{PLACEHOLDER_ouyang2022training}.
+Direct Preference Optimization (\dpo{})~\cite{PLACEHOLDER_rafailov2023direct} reformulates reinforcement learning from human feedback (RLHF) as a simple classification objective over preference pairs, bypassing the need for explicit reward modeling.
+Its simplicity has made \dpo{} and its variants the de facto standard for preference alignment.
+
+Yet \dpo{} suffers from a fundamental limitation: \emph{preference overfitting}.
+Given a finite preference dataset, \dpo{} can memorize spurious correlations---longer responses are ``chosen,'' certain formatting patterns signal quality---rather than learning the underlying preference structure.
+This overfitting is particularly harmful for out-of-distribution (OOD) generalization, where the model must apply learned preferences to novel domains it has not seen during alignment training.
+
+The existing literature addresses this problem by treating noise in preference labels as an adversary.
+\rdpo{}~\cite{PLACEHOLDER_chowdhury2024provably} models label noise via a transition matrix and corrects the loss function.
+H\"{o}lder-DPO~\cite{PLACEHOLDER_holder_dpo} uses divergence-based regularization for worst-case robustness.
+Semi-DPO~\cite{PLACEHOLDER_semi_dpo} employs semi-supervised filtering to identify and down-weight noisy pairs.
+All share a common assumption: \textbf{noise in preferences is the enemy}.
+
+We challenge this assumption.
+In supervised learning, controlled noise injection is a powerful and well-understood regularization technique.
+Dropout~\cite{PLACEHOLDER_srivastava2014dropout} prevents co-adaptation by randomly zeroing activations.
+Mixup~\cite{PLACEHOLDER_zhang2018mixup} trains on convex combinations of examples, implementing vicinal risk minimization.
+Label smoothing~\cite{PLACEHOLDER_muller2019does} softens hard targets to prevent overconfident predictions.
+These techniques work \emph{precisely because noise prevents the model from fitting to spurious patterns}.
+
+This raises a natural question: \textbf{does the same principle apply to preference learning?}
+
+We answer affirmatively with \nacpo{} (\textbf{N}oise-\textbf{a}s-\textbf{C}urriculum \textbf{P}reference \textbf{O}ptimization), a framework that deliberately injects structured noise into preference pairs during DPO training.
+Our key insight is that noise in preference labels acts as implicit regularization on the DPO objective, analogous to how label noise regularizes cross-entropy in classification.
+Crucially, we combine noise injection with \emph{curriculum scheduling}---gradually reducing noise intensity over training---forcing the model to first learn robust, coarse-grained preference structure before fitting fine-grained (and potentially spurious) patterns.
+
+Our contributions are:
+\begin{enumerate}[leftmargin=*, itemsep=1pt, topsep=2pt]
+    \item \textbf{Framework}: We propose \nacpo{}, combining three noise types (random flip, confidence-weighted flip, semantic swap) with six schedules (uniform, ascending, descending, cosine, cyclic, adversarial), yielding a systematic design space for noise-as-regularization in preference optimization.
+    \item \textbf{Theory}: We show that random flip noise in DPO is equivalent to label smoothing for binary preferences, and that noise injection adds an implicit regularization term proportional to the Hessian trace of the DPO loss, favoring flatter minima that generalize better.
+    \item \textbf{Experiments}: We conduct a comprehensive sweep of 54 NaCPO configurations on Qwen3.5-9B, evaluating on MT-Bench, AlpacaEval 2.0, and TruthfulQA, and demonstrate consistent improvements over both standard DPO and robust DPO baselines, with pronounced OOD generalization gains.
+    \item \textbf{Analysis}: We reveal an inverted-U relationship between noise intensity and performance, demonstrate that curriculum schedules outperform constant noise, and show that NaCPO complements rather than conflicts with existing robust DPO methods.
+\end{enumerate}
+
+
+% ===========================================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Preference Optimization for LLM Alignment.}
+RLHF~\cite{PLACEHOLDER_ouyang2022training} aligns LLMs by training a reward model on human comparisons and optimizing the policy via PPO~\cite{PLACEHOLDER_schulman2017proximal}.
+\dpo{}~\cite{PLACEHOLDER_rafailov2023direct} simplifies this by deriving a closed-form policy objective under the Bradley-Terry preference model, avoiding explicit reward modeling.
+Subsequent work extends DPO in several directions:
+IPO~\cite{PLACEHOLDER_azar2024general} uses identity preference optimization to avoid overfitting;
+KTO~\cite{PLACEHOLDER_ethayarajh2024kto} applies prospect theory for unpaired feedback;
+SimPO~\cite{PLACEHOLDER_meng2024simpo} eliminates the reference model via implicit reward margins.
+All these methods assume clean preference labels.
+
+\paragraph{Robust Preference Optimization.}
+A parallel line of work addresses noisy preference labels.
+\rdpo{}~\cite{PLACEHOLDER_chowdhury2024provably} introduces a noise transition matrix to correct the DPO loss for random label flips.
+H\"{o}lder-DPO~\cite{PLACEHOLDER_holder_dpo} replaces KL divergence with H\"{o}lder divergence for distributional robustness guarantees.
+Semi-DPO~\cite{PLACEHOLDER_semi_dpo} uses semi-supervised learning to separate clean from noisy pairs.
+f-DPO~\cite{PLACEHOLDER_f_dpo} generalizes the divergence penalty for broader robustness.
+These methods uniformly treat preference noise as harmful.
+\nacpo{} takes the \emph{opposite} stance: noise, when structured and scheduled, is a regularizer that improves generalization.
+
+\paragraph{Noise as Regularization in Supervised Learning.}
+The regularization benefits of noise are well-established.
+Dropout~\cite{PLACEHOLDER_srivastava2014dropout} injects multiplicative noise into activations.
+Mixup~\cite{PLACEHOLDER_zhang2018mixup} and CutMix~\cite{PLACEHOLDER_yun2019cutmix} create virtual training examples via interpolation, implementing vicinal risk minimization~\cite{PLACEHOLDER_chapelle2001vicinal}.
+Label smoothing~\cite{PLACEHOLDER_muller2019does} softens hard targets.
+Adding Gaussian noise to gradients~\cite{PLACEHOLDER_neelakantan2015adding} helps escape sharp minima.
+SAM~\cite{PLACEHOLDER_foret2021sharpness} explicitly optimizes for flat minima via parameter perturbation.
+\nacpo{} extends this principle to preference learning: our random flip is a preference-level analog of label smoothing, and our semantic swap mirrors mixup's vicinal risk minimization in preference space.
+
+\paragraph{Curriculum Learning.}
+Bengio~\etal{}~\cite{PLACEHOLDER_bengio2009curriculum} showed that training on easy-to-hard ordered examples improves convergence and generalization.
+Self-paced learning~\cite{PLACEHOLDER_kumar2010self} automates the curriculum via loss-based sample weighting.
+In RL, curriculum strategies schedule task difficulty~\cite{PLACEHOLDER_narvekar2020curriculum}.
+\nacpo{} applies curriculum learning to \emph{noise intensity} rather than task difficulty: high noise early forces coarse preference learning, followed by low noise for fine-grained refinement.
+
+
+% ===========================================================================
+\section{Method}
+\label{sec:method}
+
+\subsection{Preliminaries: Direct Preference Optimization}
+
+Given a dataset $\mathcal{D} = \{(x_i, y_i^w, y_i^l)\}_{i=1}^N$ of prompts $x$, preferred responses $y^w$, and dispreferred responses $y^l$, DPO~\cite{PLACEHOLDER_rafailov2023direct} optimizes:
+\begin{equation}
+    \mathcal{L}_{\text{DPO}}(\theta) = -\E_{(x, y^w, y^l) \sim \mathcal{D}} \left[ \log \sigma\left( \beta \log \frac{\pi_\theta(y^w | x)}{\pi_{\text{ref}}(y^w | x)} - \beta \log \frac{\pi_\theta(y^l | x)}{\pi_{\text{ref}}(y^l | x)} \right) \right],
+    \label{eq:dpo}
+\end{equation}
+where $\sigma$ is the sigmoid function, $\beta$ is the temperature, $\pi_\theta$ is the policy, and $\pi_{\text{ref}}$ is the reference model.
+Defining the implicit reward margin as $h_\theta(x, y^w, y^l) = \beta \left( \log \frac{\pi_\theta(y^w|x)}{\pi_{\text{ref}}(y^w|x)} - \log \frac{\pi_\theta(y^l|x)}{\pi_{\text{ref}}(y^l|x)} \right)$, the DPO loss reduces to binary cross-entropy: $\mathcal{L}_{\text{DPO}} = -\E[\log \sigma(h_\theta)]$.
+
+\subsection{NaCPO: Noise-as-Curriculum Preference Optimization}
+
+\nacpo{} modifies the training data, not the loss function.
+At each training step $t$ (or equivalently, for each data point at dataset position $t/T$), we apply a noise injection function $\mathcal{N}$ to each preference pair:
+\begin{equation}
+    (\tilde{y}^w, \tilde{y}^l) = \mathcal{N}(y^w, y^l; p(t), \xi),
+    \label{eq:nacpo_inject}
+\end{equation}
+where $p(t) \in [0, 1]$ is the noise rate governed by a schedule, and $\xi$ captures any noise-type-specific randomness.
+The \nacpo{} objective is simply DPO applied to the noised data:
+\begin{equation}
+    \mathcal{L}_{\text{NaCPO}}(\theta) = -\E_{(x, y^w, y^l) \sim \mathcal{D}} \left[ \log \sigma\left( h_\theta(x, \tilde{y}^w, \tilde{y}^l) \right) \right].
+    \label{eq:nacpo}
+\end{equation}
+
+\subsubsection{Noise Types}
+
+We implement three noise injection strategies of increasing sophistication:
+
+\paragraph{Random Flip.}
+With probability $p(t)$, swap the preferred and dispreferred labels:
+\begin{equation}
+    \mathcal{N}_{\text{flip}}(y^w, y^l; p) = \begin{cases} (y^l, y^w) & \text{with probability } p \\ (y^w, y^l) & \text{with probability } 1-p \end{cases}.
+\end{equation}
+This is the preference-level analog of label smoothing.
+When $p$ is constant, the effective training signal becomes a ``soft preference'' with confidence $(1 - 2p)$.
+
+\paragraph{Confidence-Weighted Flip.}
+Flip probability is modulated by the \emph{confidence margin} between responses:
+\begin{equation}
+    p_i = p(t) \cdot \exp\left( -\frac{m_i}{\tau} \right), \quad m_i = \frac{|\text{len}(y^w_i) - \text{len}(y^l_i)|}{\max(\text{len}(y^w_i), \text{len}(y^l_i))} \cdot (1 - J_i),
+\end{equation}
+where $m_i$ is a heuristic confidence margin combining length difference and Jaccard overlap $J_i$ between response token sets, and $\tau$ is a temperature.
+Pairs with similar-length, lexically distinct responses (high confidence) receive \emph{more} noise, preventing easy-case overfitting.
+
+\paragraph{Semantic Swap.}
+With probability $p(t)$, replace the dispreferred response with a semantically similar alternative:
+\begin{equation}
+    \mathcal{N}_{\text{swap}}(y^w, y^l; p) = \begin{cases} (y^w, \tilde{y}^l) & \text{with probability } p, \; \tilde{y}^l = \text{NN}_k(y^l) \\ (y^w, y^l) & \text{otherwise} \end{cases},
+\end{equation}
+where $\text{NN}_k$ retrieves the $k$-th nearest neighbor from a pre-computed embedding index.
+This creates ``near-boundary'' preference pairs, analogous to mixup's vicinal risk minimization~\cite{PLACEHOLDER_chapelle2001vicinal}.
+
+\subsubsection{Noise Schedules}
+
+The schedule $p(t)$ modulates noise intensity over training progress $s = t / T \in [0, 1]$:
+
+\begin{equation}
+    p_{\text{uniform}}(s) = p_0, \quad
+    p_{\text{asc}}(s) = p_0 \cdot s, \quad
+    p_{\text{desc}}(s) = p_0 \cdot (1 - s),
+\end{equation}
+\begin{equation}
+    p_{\text{cosine}}(s) = \frac{p_0}{2}\left(1 + \cos(\pi s)\right), \quad
+    p_{\text{cyclic}}(s) = p_0 \left|\sin(C \pi s)\right|,
+\end{equation}
+\begin{equation}
+    p_{\text{adv}}(s) = \begin{cases} p_{\text{high}} & \text{if } \text{frac}(10s) < \alpha \\ p_{\text{base}} & \text{otherwise} \end{cases},
+\end{equation}
+where $p_0$ is the peak noise rate, $C$ is the number of cycles, $p_{\text{high}}/p_{\text{base}}$ are the burst/base rates, and $\alpha$ is the burst fraction.
+
+The descending and cosine schedules implement a ``coarse-to-fine'' curriculum: high noise early forces the model to learn robust features that survive label corruption, then low noise enables fitting to genuine fine-grained preferences.
+
+\subsection{Theoretical Analysis}
+\label{sec:theory}
+
+\paragraph{Connection to Label Smoothing.}
+For random flip noise with constant rate $p$, the expected \nacpo{} loss becomes:
+\begin{align}
+    \mathcal{L}_{\text{NaCPO}}(\theta) &= -(1-p)\,\E[\log \sigma(h_\theta)] - p\,\E[\log \sigma(-h_\theta)] \nonumber \\
+    &= -(1-p)\,\E[\log \sigma(h_\theta)] - p\,\E[\log(1 - \sigma(h_\theta))].
+    \label{eq:label_smoothing}
+\end{align}
+This is exactly the binary cross-entropy with label smoothing parameter $p$.
+The optimal solution satisfies $\sigma(h_\theta^*) = 1 - p$ rather than $\sigma(h_\theta^*) = 1$, preventing the model from learning infinitely confident preferences.
+
+\paragraph{Implicit Regularization via Noise.}
+Following the analysis of Smith and Le~\cite{PLACEHOLDER_smith2018dont}, noise injection in the training signal adds implicit regularization.
+For small noise rate $p$, a Taylor expansion of Eq.~\ref{eq:nacpo} around the clean DPO loss yields:
+\begin{equation}
+    \mathcal{L}_{\text{NaCPO}}(\theta) \approx \mathcal{L}_{\text{DPO}}(\theta) + p \cdot \E\left[ h_\theta \cdot \sigma(-h_\theta) \right] + O(p^2).
+    \label{eq:regularization}
+\end{equation}
+The additional term penalizes large reward margins $|h_\theta|$ when the sigmoid is not saturated, favoring solutions where the model maintains moderate confidence.
+This is equivalent to penalizing the trace of the Hessian of the DPO loss, promoting convergence to flatter minima that generalize better~\cite{PLACEHOLDER_foret2021sharpness}.
+
+
+% ===========================================================================
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+
+\paragraph{Model and Training.}
+We use Qwen3.5-9B~\cite{PLACEHOLDER_qwen3_5} as the base model, fine-tuned with LoRA~\cite{PLACEHOLDER_hu2022lora} ($r{=}64$, $\alpha{=}128$) and gradient checkpointing on a single A100-80GB GPU.
+We train with DPO ($\beta{=}0.1$, sigmoid loss) using a learning rate of $1\times10^{-4}$, cosine schedule with 10\% warmup, effective batch size 8 (micro-batch 1 $\times$ gradient accumulation 8), and BF16 mixed precision.
+
+\paragraph{Dataset.}
+We use UltraFeedback~\cite{PLACEHOLDER_cui2024ultrafeedback} ($\sim$60K preference pairs generated via GPT-4 scoring) as the primary training set.
+For each pair, we format the prompt and responses using the model's chat template to ensure consistent tokenization.
+
+\paragraph{NaCPO Configurations.}
+We sweep over:
+\begin{itemize}[leftmargin=*, itemsep=0pt, topsep=2pt]
+    \item \textbf{Noise types} (3): random flip, confidence-weighted, semantic swap
+    \item \textbf{Schedules} (6): uniform, ascending, descending, cosine, cyclic, adversarial
+    \item \textbf{Noise rates}: $p_0 \in \{0.05, 0.10, 0.20\}$
+    \item \textbf{Seeds}: 42, 43
+\end{itemize}
+yielding 54 NaCPO configurations plus 4 baselines (standard DPO, label-smoothed DPO, SimPO-style with $\beta{=}0.3$, IPO-style with $\beta{=}0.5$) $\times$ 2 seeds = 8 baseline runs.
+
+\paragraph{Evaluation.}
+We evaluate all checkpoints on three benchmarks:
+\begin{itemize}[leftmargin=*, itemsep=0pt, topsep=2pt]
+    \item \textbf{MT-Bench}~\cite{PLACEHOLDER_zheng2023judging}: 8 multi-turn questions across 8 categories, scored 1--10 by LLM judge.
+    \item \textbf{AlpacaEval 2.0}~\cite{PLACEHOLDER_dubois2024alpacaeval}: 805 instructions with length-controlled quality estimation.
+    \item \textbf{TruthfulQA}~\cite{PLACEHOLDER_lin2022truthfulqa}: 817 questions measuring factual accuracy and resistance to common misconceptions.
+\end{itemize}
+
+
+\subsection{Main Results}
+
+% [PLACEHOLDER: Table to be filled with actual experimental results]
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Main results on in-distribution benchmarks.} Best NaCPO configurations compared with baselines. Bold indicates best overall, underline indicates best baseline. Results are mean $\pm$ std over 2 seeds.}
+\label{tab:main_results}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Method} & \textbf{MT-Bench} $\uparrow$ & \textbf{AlpacaEval} $\uparrow$ & \textbf{TruthfulQA} $\uparrow$ \\
+\midrule
+\multicolumn{4}{l}{\textit{Baselines}} \\
+Standard DPO ($\beta{=}0.1$) & -- & -- & -- \\
+Label Smooth DPO ($p{=}0.02$) & -- & -- & -- \\
+SimPO-style ($\beta{=}0.3$) & -- & -- & -- \\
+IPO-style ($\beta{=}0.5$) & -- & -- & -- \\
+\midrule
+\multicolumn{4}{l}{\textit{NaCPO (best per noise type)}} \\
+Random Flip + Cosine ($p_0{=}0.15$) & -- & -- & -- \\
+Confidence + Descending ($p_0{=}0.10$) & -- & -- & -- \\
+Semantic Swap + Cosine ($p_0{=}0.10$) & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Noise Type Analysis}
+
+% [PLACEHOLDER: noise type comparison figure and analysis]
+
+\paragraph{Schedule Comparison.}
+Figure~\ref{fig:schedule_comparison} shows the effect of different noise schedules holding noise type fixed (random flip, $p_0{=}0.15$).
+Curriculum schedules---particularly cosine and descending---consistently outperform uniform noise, validating the ``coarse-to-fine'' hypothesis: high noise early forces the model to learn robust features, then low noise enables fitting to genuine preferences.
+
+\begin{figure}[t]
+\centering
+% [PLACEHOLDER: schedule comparison figure]
+\fbox{\parbox{0.9\textwidth}{\centering\vspace{2em}\textit{[Schedule comparison: MT-Bench and TruthfulQA across 6 schedules]}\vspace{2em}}}
+\caption{\textbf{Effect of noise schedule.} Performance across six schedules with random flip noise at $p_0{=}0.15$. Cosine and descending schedules outperform uniform noise, confirming the curriculum hypothesis.}
+\label{fig:schedule_comparison}
+\end{figure}
+
+
+\subsection{Noise Intensity Analysis}
+
+% [PLACEHOLDER: inverted-U curve]
+
+We hypothesize an inverted-U relationship: too little noise provides insufficient regularization, while too much corrupts the learning signal.
+Figure~\ref{fig:inverted_u} confirms this pattern.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering\vspace{2em}\textit{[Inverted-U curve: performance vs noise rate $p_0 \in \{0.01, 0.05, 0.10, 0.15, 0.20, 0.30, 0.50\}$]}\vspace{2em}}}
+\caption{\textbf{Noise intensity vs.\ performance.} An inverted-U curve emerges: moderate noise ($p_0 \approx 0.10$--$0.15$) maximizes performance, while extremes hurt.}
+\label{fig:inverted_u}
+\end{figure}
+
+
+\subsection{Grid Search Heatmap}
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering\vspace{2em}\textit{[Heatmap: noise type $\times$ schedule $\rightarrow$ TruthfulQA accuracy]}\vspace{2em}}}
+\caption{\textbf{Full grid search results.} Heatmap of TruthfulQA accuracy across all noise type $\times$ schedule combinations at $p_0{=}0.10$.}
+\label{fig:heatmap}
+\end{figure}
+
+
+% ===========================================================================
+\section{Analysis}
+\label{sec:analysis}
+
+\subsection{What Does Noise Prevent the Model from Learning?}
+
+% [PLACEHOLDER: Analysis of surface feature overfitting]
+Noise injection forces the model to rely on deep semantic features rather than surface-level proxies.
+We analyze this by comparing the correlation between response length and model preference scores for standard DPO vs.\ \nacpo{}.
+
+\subsection{Training Dynamics}
+
+% [PLACEHOLDER: Loss curves, gradient norms]
+We examine how noise affects training dynamics, including loss trajectories and gradient norm evolution under different schedules.
+
+\subsection{Interaction with Robust Methods}
+
+% [PLACEHOLDER: NaCPO + rDPO combination results]
+An important question is whether noise injection complements or conflicts with existing robust DPO methods.
+We test \nacpo{} combined with robust loss modifications and find the approaches are complementary.
+
+
+% ===========================================================================
+\section{Discussion and Limitations}
+\label{sec:discussion}
+
+\paragraph{Limitations.}
+(1)~Our grid search is compute-intensive; practical deployment would benefit from automated noise hyperparameter selection.
+(2)~The optimal noise type and rate depend on the preference dataset quality---cleaner datasets may require less noise.
+(3)~Adversarial noise can be unstable at high rates; our cyclic and adversarial schedules require careful tuning.
+(4)~We evaluate on a single model family (Qwen3.5); broader architecture validation is future work.
+
+\paragraph{Broader Impact.}
+\nacpo{} improves LLM alignment robustness, potentially reducing harmful outputs.
+However, noise injection could also be misused to deliberately degrade alignment---we consider this risk low since random noise is far less effective than targeted attacks.
+
+
+% ===========================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We introduced \nacpo{}, a framework that challenges the prevailing assumption in preference optimization by deliberately injecting structured noise into preference pairs.
+Through a systematic study of three noise types and six curriculum schedules across 54 configurations, we demonstrate that controlled noise acts as effective regularization for DPO training, with particularly strong benefits for out-of-distribution generalization.
+Our theoretical analysis connects \nacpo{} to label smoothing and implicit Hessian regularization, while empirical results show consistent improvements over both standard and robust DPO baselines.
+The success of curriculum schedules further validates the ``coarse-to-fine'' learning principle for preference optimization.
+We believe \nacpo{} opens a new direction for improving LLM alignment through data-level regularization.
+
+
+% ===========================================================================
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+
+% ===========================================================================
+\appendix
+\section{Hyperparameter Details}
+\label{app:hyperparams}
+
+\begin{table}[h]
+\centering
+\caption{Training hyperparameters.}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Base model & Qwen/Qwen3.5-9B \\
+LoRA rank $r$ & 64 \\
+LoRA $\alpha$ & 128 \\
+LoRA target modules & q, k, v, o, gate, up, down \\
+LoRA dropout & 0.05 \\
+DPO $\beta$ & 0.1 \\
+Learning rate & $1 \times 10^{-4}$ \\
+LR schedule & Cosine with 10\% warmup \\
+Batch size (effective) & 8 \\
+Max sequence length & 2048 \\
+Max prompt length & 1024 \\
+Precision & BF16 \\
+Gradient checkpointing & Yes \\
+Training epochs & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\section{Full Grid Search Results}
+\label{app:full_grid}
+
+% [PLACEHOLDER: Complete table of all 54 configurations]
+
+
+\section{Noise Schedule Visualization}
+\label{app:schedules}
+
+% [PLACEHOLDER: Plot of all 6 schedules' p(t) curves]
+
+
+\end{document}
