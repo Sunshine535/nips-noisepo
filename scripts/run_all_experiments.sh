@@ -44,15 +44,29 @@ log "[Stage 1/6] Preparing data"
 log "========================================="
 
 python -c "
-from datasets import load_dataset
-import os
+import os, time
 os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
-print('Loading UltraFeedback...')
+from datasets import load_dataset
+
+print('Loading UltraFeedback (primary training set)...')
 ds = load_dataset('openbmb/UltraFeedback', split='train')
 print(f'UltraFeedback: {len(ds)} samples')
-print('Loading TruthfulQA...')
-tqa = load_dataset('truthful_qa', 'generation', split='validation')
-print(f'TruthfulQA: {len(tqa)} samples')
+
+print('Loading TruthfulQA (eval set, optional)...')
+for attempt in range(3):
+    try:
+        tqa = load_dataset('truthful_qa', 'generation', split='validation')
+        print(f'TruthfulQA: {len(tqa)} samples')
+        break
+    except Exception as e:
+        print(f'  Attempt {attempt+1}/3 failed: {e}')
+        if attempt < 2:
+            wait = 60 * (attempt + 1)
+            print(f'  Retrying in {wait}s...')
+            time.sleep(wait)
+        else:
+            print('  WARN: TruthfulQA download failed. Will retry during eval stage.')
+
 print('Data preparation complete.')
 " 2>&1 | tee "${LOG_DIR}/stage1_data_prep.log"
 
