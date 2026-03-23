@@ -21,6 +21,7 @@ import torch
 import yaml
 from datasets import Dataset as HFDataset
 from datasets import load_dataset
+from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import DPOConfig, DPOTrainer
 
@@ -30,6 +31,12 @@ from src.noise_curriculum import (
     NoiseSchedule, UniformSchedule, AscendingSchedule, DescendingSchedule,
     AdversarialSchedule,
 )
+from src.qwen35_compat import (
+    apply_qwen35_text_only_patch, patch_model_instance, ClearRopeDeltasCallback,
+)
+
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+apply_qwen35_text_only_patch()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -168,7 +175,6 @@ def inject_noise_into_dataset(dataset, schedule, injector, noise_type, seed, war
 def main():
     args = parse_args()
     cfg = load_config(args.config)
-    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
     is_baseline = args.noise_schedule == "none" and args.noise_type == "none"
     tag = f"{'baseline' if is_baseline else f'{args.noise_schedule}_{args.noise_type}'}"
@@ -193,6 +199,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.bfloat16, trust_remote_code=True,
     )
+    patch_model_instance(model)
 
     dataset_name = args.dataset_name or cfg["dataset"]["name"]
     max_samples = args.max_train_samples or cfg["dataset"].get("max_train_samples")
@@ -246,11 +253,12 @@ def main():
         per_device_train_batch_size=args.per_device_train_batch_size or tcfg["per_device_train_batch_size"],
         gradient_accumulation_steps=args.gradient_accumulation_steps or tcfg["gradient_accumulation_steps"],
         num_train_epochs=args.num_train_epochs or tcfg["num_train_epochs"],
-        learning_rate=args.learning_rate or tcfg["learning_rate"],
+        learning_rate=args.learning_rate or tcfg.get("learning_rate_lora", tcfg["learning_rate"]),
         warmup_ratio=tcfg["warmup_ratio"],
         weight_decay=tcfg["weight_decay"],
         max_grad_norm=tcfg["max_grad_norm"],
         bf16=tcfg["bf16"],
+        gradient_checkpointing=True,
         logging_steps=tcfg["logging_steps"],
         save_steps=tcfg["save_steps"],
         beta=args.beta or tcfg["beta"],
@@ -260,11 +268,25 @@ def main():
         report_to="none",
     )
 
+    lora_cfg = cfg.get("lora", {})
+    peft_config = LoraConfig(
+        r=lora_cfg.get("r", 64),
+        lora_alpha=lora_cfg.get("lora_alpha", 128),
+        target_modules=lora_cfg.get("target_modules", ["q_proj", "k_proj", "v_proj", "o_proj"]),
+        lora_dropout=lora_cfg.get("lora_dropout", 0.05),
+        task_type=lora_cfg.get("task_type", "CAUSAL_LM"),
+    )
+    logger.info("Using LoRA: r=%d, alpha=%d", peft_config.r, peft_config.lora_alpha)
+
+    callbacks.append(ClearRopeDeltasCallback())
+
     trainer = DPOTrainer(
         model=model,
+        ref_model=None,
         args=training_config,
         train_dataset=dataset,
         processing_class=tokenizer,
+        peft_config=peft_config,
         callbacks=callbacks,
     )
 

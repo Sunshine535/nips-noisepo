@@ -14,9 +14,6 @@ if [ -f "$_PROJ_ROOT/.venv/bin/activate" ]; then source "$_PROJ_ROOT/.venv/bin/a
 export PATH="$HOME/.local/bin:$PATH"
 
 export HF_ENDPOINT="https://hf-mirror.com"
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-export NCCL_P2P_DISABLE=0
-export NCCL_IB_DISABLE=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -25,35 +22,15 @@ CONFIG="${PROJECT_DIR}/configs/nacpo_configs.yaml"
 CHECKPOINT_DIR="${PROJECT_DIR}/checkpoints"
 RESULTS_DIR="${PROJECT_DIR}/results"
 LOG_DIR="${PROJECT_DIR}/logs"
-DS_CONFIG="${PROJECT_DIR}/configs/ds_config_sweep.json"
 
 mkdir -p "$CHECKPOINT_DIR" "$RESULTS_DIR" "$LOG_DIR"
 
-NUM_GPUS=8
+NUM_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
+NUM_GPUS=${NUM_GPUS:-1}
+log "Detected $NUM_GPUS GPU(s)"
 
 timestamp() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $1"; }
-
-# Create DeepSpeed config
-cat > "$DS_CONFIG" << 'DSEOF'
-{
-    "bf16": {"enabled": true},
-    "zero_optimization": {
-        "stage": 3,
-        "offload_optimizer": {"device": "cpu", "pin_memory": true},
-        "offload_param": {"device": "none"},
-        "overlap_comm": true,
-        "contiguous_gradients": true,
-        "reduce_scatter": true,
-        "reduce_bucket_size": 5e7,
-        "allgather_bucket_size": 5e7
-    },
-    "gradient_accumulation_steps": "auto",
-    "gradient_clipping": "auto",
-    "train_batch_size": "auto",
-    "train_micro_batch_size_per_gpu": "auto"
-}
-DSEOF
 
 NOISE_TYPES=(random_flip confidence_weighted semantic_swap)
 SCHEDULES=(uniform ascending descending adversarial)
@@ -76,8 +53,7 @@ run_train() {
     fi
 
     log "Training: $tag"
-    deepspeed --num_gpus $NUM_GPUS \
-        "${SCRIPT_DIR}/train_nacpo.py" \
+    python "${SCRIPT_DIR}/train_nacpo.py" \
         --config "$CONFIG" \
         --noise_schedule "$schedule" \
         --noise_type "$noise_type" \

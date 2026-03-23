@@ -38,10 +38,11 @@ noise_types:
     top_k_similar: 5
 
 training:
-  per_device_train_batch_size: 2
+  per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
   learning_rate: 5.0e-7
+  learning_rate_lora: 1.0e-4
   warmup_ratio: 0.1
   weight_decay: 0.01
   max_grad_norm: 1.0
@@ -53,10 +54,12 @@ training:
   beta: 0.1
   loss_type: "sigmoid"
 
-deepspeed:
-  stage: 3
-  offload_optimizer: true
-  offload_param: false
+lora:
+  r: 64
+  lora_alpha: 128
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  lora_dropout: 0.05
+  task_type: "CAUSAL_LM"
 
 eval:
   mt_bench:
