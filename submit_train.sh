@@ -12,7 +12,7 @@ set -euo pipefail
 # ========== VARIABLES (modify as needed) ==========
 GPU_NUMS=${GPU_NUMS:-8}
 CONDA_BASE=/data/szs/250010072/szs/anaconda3
-ENV_NAME=nips_noisepo
+ENV_NAME=llama_factory
 PROJECT_DIR=/data/szs/250010072/nwh/nips-noisepo
 DATA_DIR=/data/szs/250010072/nwh/data
 SHARE_DIR=/data/szs/share
