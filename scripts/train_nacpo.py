@@ -70,6 +70,8 @@ def parse_args():
     parser.add_argument("--max_train_samples", type=int, default=None)
     parser.add_argument("--beta", type=float, default=None, help="DPO beta parameter")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--deepspeed", type=str, default=None,
+                        help="DeepSpeed config JSON path for multi-GPU training")
     parser.add_argument("--local_rank", type=int, default=-1)
     return parser.parse_args()
 
@@ -278,7 +280,7 @@ def main():
         collator.set_training_steps(total_steps)
         callbacks.append(NaCPOCallback(collator, args.warmup_steps))
 
-    training_config = DPOConfig(
+    dpo_kwargs = dict(
         output_dir=output_dir,
         per_device_train_batch_size=args.per_device_train_batch_size or tcfg["per_device_train_batch_size"],
         gradient_accumulation_steps=args.gradient_accumulation_steps or tcfg["gradient_accumulation_steps"],
@@ -297,6 +299,9 @@ def main():
         seed=args.seed,
         report_to="none",
     )
+    if args.deepspeed:
+        dpo_kwargs["deepspeed"] = args.deepspeed
+    training_config = DPOConfig(**dpo_kwargs)
 
     lora_cfg = cfg.get("lora", {})
     peft_config = LoraConfig(

@@ -17,7 +17,7 @@ export HF_ENDPOINT="https://hf-mirror.com"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-CONFIG="${PROJECT_DIR}/configs/nacpo_configs.yaml"
+CONFIG="${NACPO_CONFIG:-${PROJECT_DIR}/configs/nacpo_configs.yaml}"
 
 CHECKPOINT_DIR="${PROJECT_DIR}/checkpoints"
 RESULTS_DIR="${PROJECT_DIR}/results"
@@ -31,6 +31,22 @@ log() { echo "[$(timestamp)] $1"; }
 NUM_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
 NUM_GPUS=${NUM_GPUS:-1}
 log "Detected $NUM_GPUS GPU(s)"
+
+if [ "$NUM_GPUS" -gt 1 ]; then
+    DS_CONFIG="${PROJECT_DIR}/configs/ds_zero2.json"
+    if [ -f "$DS_CONFIG" ]; then
+        LAUNCH_CMD="deepspeed --num_gpus=${NUM_GPUS}"
+        DS_ARG="--deepspeed ${DS_CONFIG}"
+        log "Using DeepSpeed ZeRO-2 with ${NUM_GPUS} GPUs"
+    else
+        LAUNCH_CMD="torchrun --nproc_per_node=${NUM_GPUS} --master_port=$((RANDOM % 10000 + 20000))"
+        DS_ARG=""
+        log "Using torchrun DDP with ${NUM_GPUS} GPUs"
+    fi
+else
+    LAUNCH_CMD="python"
+    DS_ARG=""
+fi
 
 NOISE_TYPES=(random_flip confidence_weighted semantic_swap)
 SCHEDULES=(uniform ascending descending cosine cyclic adversarial)
@@ -52,9 +68,10 @@ run_train() {
         return 0
     fi
 
-    log "Training: $tag"
-    python "${SCRIPT_DIR}/train_nacpo.py" \
+    log "Training: $tag (launcher: ${LAUNCH_CMD%% *})"
+    ${LAUNCH_CMD} "${SCRIPT_DIR}/train_nacpo.py" \
         --config "$CONFIG" \
+        ${DS_ARG} \
         --noise_schedule "$schedule" \
         --noise_type "$noise_type" \
         --noise_rate "$noise_rate" \

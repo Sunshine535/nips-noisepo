@@ -17,6 +17,13 @@ checkpoints/
 .DS_Store
 Thumbs.db
 
+# Logs (synced via scp, not git)
+logs/
+
+# Cursor/specstory
+.specstory/
+cursor_*.md
+
 # Large experiment artifacts (use collect_results.sh to archive)
 results_archive/*.tar.gz
 checkpoints/**/*.pt
