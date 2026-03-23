@@ -32,17 +32,16 @@ NUM_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
 NUM_GPUS=${NUM_GPUS:-1}
 log "Detected $NUM_GPUS GPU(s)"
 
-if [ "$NUM_GPUS" -gt 1 ]; then
-    DS_CONFIG="${PROJECT_DIR}/configs/ds_zero2.json"
-    if [ -f "$DS_CONFIG" ]; then
-        LAUNCH_CMD="deepspeed --num_gpus=${NUM_GPUS}"
-        DS_ARG="--deepspeed ${DS_CONFIG}"
-        log "Using DeepSpeed ZeRO-2 with ${NUM_GPUS} GPUs"
-    else
-        LAUNCH_CMD="torchrun --nproc_per_node=${NUM_GPUS} --master_port=$((RANDOM % 10000 + 20000))"
-        DS_ARG=""
-        log "Using torchrun DDP with ${NUM_GPUS} GPUs"
-    fi
+DS_CONFIG="${PROJECT_DIR}/configs/ds_zero2.json"
+DS_ARG=""
+[ -f "$DS_CONFIG" ] && DS_ARG="--deepspeed ${DS_CONFIG}"
+
+if [ -n "${SENSECORE_ACCELERATE_DEVICE_COUNT:-}" ]; then
+    LAUNCH_CMD="torchrun --nproc_per_node=${SENSECORE_ACCELERATE_DEVICE_COUNT} --nnodes=${SENSECORE_PYTORCH_NNODES:-1} --node_rank=${SENSECORE_PYTORCH_NODE_RANK:-0} --master_addr=${MASTER_ADDR:-localhost} --master_port=${MASTER_PORT:-29500}"
+    log "ACP mode: torchrun ${SENSECORE_ACCELERATE_DEVICE_COUNT} GPUs × ${SENSECORE_PYTORCH_NNODES:-1} nodes"
+elif [ "$NUM_GPUS" -gt 1 ]; then
+    LAUNCH_CMD="torchrun --nproc_per_node=${NUM_GPUS} --master_port=$((RANDOM % 10000 + 20000))"
+    log "Local multi-GPU: torchrun ${NUM_GPUS} GPUs"
 else
     LAUNCH_CMD="python"
     DS_ARG=""
