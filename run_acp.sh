@@ -26,11 +26,19 @@ echo " $(date) | $(hostname)"
 echo " GPUs: ${SENSECORE_ACCELERATE_DEVICE_COUNT:-unknown}"
 echo "============================================"
 
-# ========== INSTALL ONLY MISSING PACKAGES (system-wide, respects existing torch) ==========
-python -c "import sentence_transformers" 2>/dev/null || {
-    echo "[env] Installing sentence-transformers..."
-    pip install sentence-transformers 2>&1 | tail -5
-}
+# ========== UPGRADE PACKAGES FOR QWEN3.5 SUPPORT ==========
+# Container has transformers 4.41.2 which doesn't know qwen3_5 arch.
+# Upgrade HF stack together to stay compatible. Torch 2.3.0 is kept.
+MARKER=/data/szs/250010072/nwh/.acp_pkg_done_v3
+if [ ! -f "${MARKER}" ]; then
+    echo "[env] Upgrading HF packages for Qwen3.5 support..."
+    pip install --upgrade transformers trl peft accelerate datasets \
+        sentence-transformers 2>&1 | tail -15
+    touch "${MARKER}"
+    echo "[env] Done."
+else
+    echo "[env] Packages already upgraded."
+fi
 
 export HF_ENDPOINT="https://hf-mirror.com"
 export HF_HOME="${DATA_DIR}/hf_cache"
