@@ -30,6 +30,7 @@ echo "============================================"
 export HF_ENDPOINT="https://hf-mirror.com"
 export HF_HOME="${DATA_DIR}/hf_cache"
 export TOKENIZERS_PARALLELISM=false
+export DS_BUILD_OPS=0
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda-12.8}
 export PATH=${CUDA_HOME}/bin:${PATH}
 
@@ -49,11 +50,15 @@ print(f'Accelerate {accelerate.__version__}, DeepSpeed {deepspeed.__version__}')
 "
 
 python -c "
-import deepspeed
-from deepspeed.ops.op_builder import FusedAdamBuilder, CPUAdamBuilder
-for name, builder in [('fused_adam', FusedAdamBuilder()), ('cpu_adam', CPUAdamBuilder())]:
-    status = 'PRE-BUILT' if builder.is_installed() else 'JIT (will compile at runtime)'
-    print(f'  DS op {name}: {status}')
+import importlib, os
+for op in ['deepspeed_fused_adam', 'deepspeed_cpu_adam']:
+    try:
+        importlib.import_module(op)
+        print(f'  DS op {op}: PRE-BUILT')
+    except ImportError:
+        print(f'  DS op {op}: JIT (will compile at runtime)')
+nvcc = os.popen('nvcc --version 2>/dev/null | tail -1').read().strip()
+print(f'  nvcc: {nvcc or \"not found (DS_BUILD_OPS=0 will skip JIT)\"}')
 "
 
 ls ${SHARE_DIR}/Qwen3.5-9B/config.json 2>/dev/null \
