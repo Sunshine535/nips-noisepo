@@ -2,8 +2,8 @@
 # ============================================================================
 # NaCPO ACP Training — Startup Script
 #
-# Custom image: nacpo-train:v1.0-torch2.4.1
-#   PyTorch 2.4.1+cu124, Transformers 5.3.0, TRL 0.29.1, PEFT 0.18.1,
+# Custom image: nacpo-train:v2.0-torch2.10-cu128
+#   PyTorch 2.10.0+cu128, Transformers 5.3.0, TRL 0.29.1, PEFT 0.18.1,
 #   DeepSpeed 0.18.8, SentenceTransformers 5.3.0, Accelerate 1.13.0
 #
 # Startup command:
@@ -29,6 +29,8 @@ echo "============================================"
 export HF_ENDPOINT="https://hf-mirror.com"
 export HF_HOME="${DATA_DIR}/hf_cache"
 export TOKENIZERS_PARALLELISM=false
+export DS_BUILD_OPS=0
+export CUDA_HOME=$(python -c "import torch.utils; print(torch.utils.cmake_prefix_path.replace('/share/cmake', ''))" 2>/dev/null || echo "")
 
 cd ${PROJECT_DIR}
 
