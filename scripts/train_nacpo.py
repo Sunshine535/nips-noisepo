@@ -88,8 +88,27 @@ def prepare_preference_data(dataset_name, split, max_samples=None, tokenizer=Non
     each row has 'prompt', 'chosen', 'rejected' as chat-formatted lists
     when a tokenizer with chat_template is available, or as plain strings.
     """
-    logger.info(f"Loading dataset: {dataset_name} split={split}")
-    raw = load_dataset(dataset_name, split=split)
+    import time
+
+    rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+
+    if rank == 0 or world_size <= 1:
+        logger.info(f"[rank {rank}] Downloading dataset: {dataset_name} split={split}")
+        raw = load_dataset(dataset_name, split=split)
+        if world_size > 1:
+            signal = Path(os.environ.get("HF_HOME", "/tmp")) / ".dataset_download_done"
+            signal.write_text("ok")
+            logger.info(f"[rank 0] Dataset ready, signaled other ranks")
+    else:
+        signal = Path(os.environ.get("HF_HOME", "/tmp")) / ".dataset_download_done"
+        logger.info(f"[rank {rank}] Waiting for rank 0 to finish dataset download...")
+        for _ in range(600):
+            if signal.exists():
+                break
+            time.sleep(1)
+        logger.info(f"[rank {rank}] Loading dataset from cache: {dataset_name}")
+        raw = load_dataset(dataset_name, split=split)
 
     use_chat = (
         tokenizer is not None
@@ -202,6 +221,11 @@ def main():
     args = parse_args()
     cfg = load_config(args.config)
 
+    rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")))
+    if rank == 0:
+        signal = Path(os.environ.get("HF_HOME", "/tmp")) / ".dataset_download_done"
+        signal.unlink(missing_ok=True)
+
     is_baseline = args.noise_schedule == "none" and args.noise_type == "none"
     tag = f"{'baseline' if is_baseline else f'{args.noise_schedule}_{args.noise_type}'}"
     if args.noise_rate is not None:
@@ -223,7 +247,7 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.bfloat16, trust_remote_code=True,
+        model_name, dtype=torch.bfloat16, trust_remote_code=True,
     )
     patch_model_instance(model)
 
