@@ -308,6 +308,7 @@ def main():
         gradient_checkpointing=True,
         logging_steps=tcfg["logging_steps"],
         save_steps=tcfg["save_steps"],
+        save_total_limit=1,
         beta=args.beta or tcfg["beta"],
         loss_type=tcfg["loss_type"],
         max_length=tcfg["max_length"],
