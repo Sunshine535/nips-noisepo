@@ -31,7 +31,10 @@ checkpoints/**/*.bin
 checkpoints/**/*.safetensors
 outputs/**/*.pt
 *.ckpt
-__pycache__/
 .venv/
 *.egg-info/
 wandb/
+
+# Docker build artifacts
+docker/buildah-*
+docker/*.tar

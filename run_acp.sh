@@ -2,9 +2,10 @@
 # ============================================================================
 # NaCPO ACP Training — Startup Script
 #
-# Custom image: nacpo-train:v2.0-torch2.10-cu128
+# Custom image: nacpo-train:v3.0-torch2.10-cu128-full
 #   PyTorch 2.10.0+cu128, Transformers 5.3.0, TRL 0.29.1, PEFT 0.18.1,
-#   DeepSpeed 0.18.8, SentenceTransformers 5.3.0, Accelerate 1.13.0
+#   DeepSpeed 0.18.8 (fused_adam+cpu_adam pre-compiled), Accelerate 1.13.0,
+#   SentenceTransformers 5.3.0, CUDA nvcc 12.8 (full toolkit)
 #
 # Startup command:
 #   bash /data/szs/250010072/nwh/nips-noisepo/run_acp.sh
@@ -29,8 +30,8 @@ echo "============================================"
 export HF_ENDPOINT="https://hf-mirror.com"
 export HF_HOME="${DATA_DIR}/hf_cache"
 export TOKENIZERS_PARALLELISM=false
-export DS_BUILD_OPS=0
-export CUDA_HOME=$(python -c "import torch.utils; print(torch.utils.cmake_prefix_path.replace('/share/cmake', ''))" 2>/dev/null || echo "")
+export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda-12.8}
+export PATH=${CUDA_HOME}/bin:${PATH}
 
 cd ${PROJECT_DIR}
 
@@ -46,6 +47,15 @@ import trl, peft, transformers, accelerate, deepspeed
 print(f'TRL {trl.__version__}, PEFT {peft.__version__}, Transformers {transformers.__version__}')
 print(f'Accelerate {accelerate.__version__}, DeepSpeed {deepspeed.__version__}')
 "
+
+python -c "
+import deepspeed
+from deepspeed.ops.op_builder import FusedAdamBuilder, CPUAdamBuilder
+for name, builder in [('fused_adam', FusedAdamBuilder()), ('cpu_adam', CPUAdamBuilder())]:
+    status = 'PRE-BUILT' if builder.is_installed() else 'JIT (will compile at runtime)'
+    print(f'  DS op {name}: {status}')
+"
+
 ls ${SHARE_DIR}/Qwen3.5-9B/config.json 2>/dev/null \
     && echo "[ok] Model found." \
     || echo "[WARN] Model not at ${SHARE_DIR}/Qwen3.5-9B!"
