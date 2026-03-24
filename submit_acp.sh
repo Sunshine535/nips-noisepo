@@ -17,7 +17,7 @@ WORKSPACE="share_space_01g"
 CLUSTER="computing_cluster"
 PROJECT_DIR="/data/szs/250010072/nwh/nips-noisepo"
 
-CONTAINER_IMAGE="registry.cn-sh-01.sensecore.cn/ccr-zhicheng-01/nacpo-train:v1.0-torch2.4.1"
+CONTAINER_IMAGE="registry.cn-sh-01.sensecore.cn/ccr-zhicheng-01/nacpo-train:v2.0-torch2.10-cu128"
 
 echo "Submitting: ${GPU_NUMS}x N6IS-80G"
 
