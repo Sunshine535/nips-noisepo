@@ -20,7 +20,7 @@ from pathlib import Path
 import torch
 import yaml
 from datasets import Dataset as HFDataset
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import DPOConfig, DPOTrainer
@@ -81,18 +81,26 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def prepare_preference_data(dataset_name, split, max_samples=None, tokenizer=None):
+def prepare_preference_data(dataset_name, split, max_samples=None, tokenizer=None,
+                            local_path=None):
     """Load and prepare preference pairs from UltraFeedback or Anthropic HH.
 
     Returns data in the conversational format expected by TRL DPOTrainer:
     each row has 'prompt', 'chosen', 'rejected' as chat-formatted lists
     when a tokenizer with chat_template is available, or as plain strings.
 
-    Datasets are pre-cached on persistent storage ($HF_HOME/datasets/).
-    Pre-download on CPU server: python -c "from datasets import load_dataset; load_dataset('openbmb/UltraFeedback')"
+    If local_path is set, loads pre-saved Arrow dataset from disk (no network,
+    no FileLock). Otherwise falls back to load_dataset() from HF Hub/cache.
+    Pre-save on CPU server:
+        ds = load_dataset('openbmb/UltraFeedback', split='train')
+        ds.save_to_disk('/path/to/ultrafeedback_train')
     """
-    logger.info(f"Loading dataset: {dataset_name} split={split}")
-    raw = load_dataset(dataset_name, split=split)
+    if local_path and Path(local_path).exists():
+        logger.info(f"Loading dataset from disk: {local_path}")
+        raw = load_from_disk(local_path)
+    else:
+        logger.info(f"Loading dataset from HF: {dataset_name} split={split}")
+        raw = load_dataset(dataset_name, split=split)
 
     use_chat = (
         tokenizer is not None
@@ -231,8 +239,12 @@ def main():
     patch_model_instance(model)
 
     dataset_name = args.dataset_name or cfg["dataset"]["name"]
+    local_path = cfg["dataset"].get("local_path")
     max_samples = args.max_train_samples or cfg["dataset"].get("max_train_samples")
-    dataset = prepare_preference_data(dataset_name, cfg["dataset"]["split"], max_samples, tokenizer)
+    dataset = prepare_preference_data(
+        dataset_name, cfg["dataset"]["split"], max_samples, tokenizer,
+        local_path=local_path,
+    )
 
     tcfg = cfg["training"]
     callbacks = []

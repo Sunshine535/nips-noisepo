@@ -4,6 +4,7 @@ model:
 
 dataset:
   name: "openbmb/UltraFeedback"
+  local_path: "/data/szs/250010072/nwh/noisepo_data/datasets/ultrafeedback_train"
   split: "train"
   eval_split: "test"
   max_train_samples: 50000
