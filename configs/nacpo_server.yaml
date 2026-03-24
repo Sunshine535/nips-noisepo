@@ -4,7 +4,8 @@ model:
 
 dataset:
   name: "openbmb/UltraFeedback"
-  local_path: "/data/szs/250010072/nwh/noisepo_data/datasets/ultrafeedback_train"
+  local_path: "/data/szs/share/noisepo/datasets/ultrafeedback_train"
+  truthfulqa_local_path: "/data/szs/share/noisepo/datasets/truthfulqa_validation"
   split: "train"
   eval_split: "test"
   max_train_samples: 50000
@@ -126,5 +127,5 @@ sweep:
   baseline_no_noise: true
 
 output:
-  base_dir: "/data/szs/250010072/nwh/data/results"
-  checkpoint_dir: "/data/szs/250010072/nwh/data/checkpoints"
+  base_dir: "/data/szs/share/noisepo/results"
+  checkpoint_dir: "/data/szs/share/noisepo/checkpoints"

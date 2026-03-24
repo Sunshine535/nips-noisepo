@@ -14,7 +14,7 @@ GPU_NUMS=${GPU_NUMS:-8}
 CONDA_BASE=/data/szs/250010072/szs/anaconda3
 ENV_NAME=llama_factory
 PROJECT_DIR=/data/szs/250010072/nwh/nips-noisepo
-DATA_DIR=/data/szs/250010072/nwh/data
+DATA_DIR=/data/szs/share/noisepo
 SHARE_DIR=/data/szs/share
 
 LOG_FILE_PATH="${DATA_DIR}/logs"
@@ -45,6 +45,7 @@ cd ${PROJECT_DIR}
 
 # Use server config (local model paths)
 export NACPO_CONFIG="${PROJECT_DIR}/configs/nacpo_server.yaml"
+export NACPO_DATA_DIR="${DATA_DIR}"
 
 # ========== PRE-FLIGHT CHECK ==========
 echo "============================================" | tee -a ${LOG_FILE}

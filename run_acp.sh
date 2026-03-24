@@ -13,7 +13,7 @@
 set -euo pipefail
 
 PROJECT_DIR=/data/szs/250010072/nwh/nips-noisepo
-DATA_DIR=/data/szs/250010072/nwh/noisepo_data
+DATA_DIR=/data/szs/share/noisepo
 SHARE_DIR=/data/szs/share
 
 LOG_DIR=${DATA_DIR}/logs
@@ -30,23 +30,8 @@ echo "============================================"
 export HF_ENDPOINT="https://hf-mirror.com"
 export HF_HOME="${DATA_DIR}/hf_cache"
 export TOKENIZERS_PARALLELISM=false
-
-# DeepSpeed 0.18.8 unconditionally runs `nvcc -V` during import to check
-# all ops compatibility. Create a shim so the check passes even when the
-# real nvcc binary is missing from the container.
-export CUDA_HOME=/usr/local/cuda-12.8
-if [ ! -x "${CUDA_HOME}/bin/nvcc" ]; then
-    mkdir -p "${CUDA_HOME}/bin"
-    cat > "${CUDA_HOME}/bin/nvcc" << 'NVCC_SHIM'
-#!/bin/bash
-echo "nvcc: NVIDIA (R) Cuda compiler driver"
-echo "Copyright (c) 2005-2025 NVIDIA Corporation"
-echo "Cuda compilation tools, release 12.8, V12.8.93"
-echo "Build cuda_12.8.r12.8/compiler.35583870_0"
-NVCC_SHIM
-    chmod +x "${CUDA_HOME}/bin/nvcc"
-    echo "[env] Created nvcc shim at ${CUDA_HOME}/bin/nvcc"
-fi
+export DS_BUILD_OPS=0
+export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda-12.8}
 export PATH=${CUDA_HOME}/bin:${PATH}
 
 cd ${PROJECT_DIR}
@@ -64,12 +49,25 @@ print(f'TRL {trl.__version__}, PEFT {peft.__version__}, Transformers {transforme
 print(f'Accelerate {accelerate.__version__}, DeepSpeed {deepspeed.__version__}')
 "
 
+python -c "
+import importlib, os
+for op in ['deepspeed_fused_adam', 'deepspeed_cpu_adam']:
+    try:
+        importlib.import_module(op)
+        print(f'  DS op {op}: PRE-BUILT')
+    except ImportError:
+        print(f'  DS op {op}: JIT (will compile at runtime)')
+nvcc = os.popen('nvcc --version 2>/dev/null | tail -1').read().strip()
+print(f'  nvcc: {nvcc or \"not found (DS_BUILD_OPS=0 will skip JIT)\"}')
+"
+
 ls ${SHARE_DIR}/Qwen3.5-9B/config.json 2>/dev/null \
     && echo "[ok] Model found." \
     || echo "[WARN] Model not at ${SHARE_DIR}/Qwen3.5-9B!"
 
 # ========== RUN SWEEP ==========
 export NACPO_CONFIG="${PROJECT_DIR}/configs/nacpo_server.yaml"
+export NACPO_DATA_DIR="${DATA_DIR}"
 
 echo ""
 echo "Config: ${NACPO_CONFIG}"

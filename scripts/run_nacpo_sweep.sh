@@ -19,9 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG="${NACPO_CONFIG:-${PROJECT_DIR}/configs/nacpo_configs.yaml}"
 
-CHECKPOINT_DIR="${PROJECT_DIR}/checkpoints"
-RESULTS_DIR="${PROJECT_DIR}/results"
-LOG_DIR="${PROJECT_DIR}/logs"
+NACPO_DATA_DIR="${NACPO_DATA_DIR:-/data/szs/share/noisepo}"
+CHECKPOINT_DIR="${NACPO_DATA_DIR}/checkpoints"
+RESULTS_DIR="${NACPO_DATA_DIR}/results"
+LOG_DIR="${NACPO_DATA_DIR}/logs"
 
 mkdir -p "$CHECKPOINT_DIR" "$RESULTS_DIR" "$LOG_DIR"
 

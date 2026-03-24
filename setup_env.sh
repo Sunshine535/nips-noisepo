@@ -4,7 +4,7 @@ set -e
 CONDA_BASE=/data/szs/250010072/szs/anaconda3
 ENV_NAME=llama_factory
 PROJECT_DIR=/data/szs/250010072/nwh/nips-noisepo
-DATA_DIR=/data/szs/250010072/nwh/data
+DATA_DIR=/data/szs/share/noisepo
 SHARE_DIR=/data/szs/share
 
 source ${CONDA_BASE}/bin/activate

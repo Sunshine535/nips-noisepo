@@ -19,7 +19,7 @@ from pathlib import Path
 
 import torch
 import yaml
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 
@@ -257,11 +257,15 @@ def eval_alpacaeval(model, tokenizer, args, max_samples=805):
 
 # ── TruthfulQA ──────────────────────────────────────────────────────────────
 
-def eval_truthfulqa(model, tokenizer, args, max_samples=817):
+def eval_truthfulqa(model, tokenizer, args, max_samples=817, local_path=None):
     """TruthfulQA MC accuracy evaluation."""
     logger.info("Running TruthfulQA evaluation")
 
-    ds = load_dataset("truthful_qa", "generation", split="validation")
+    if local_path and Path(local_path).exists():
+        logger.info(f"Loading TruthfulQA from disk: {local_path}")
+        ds = load_from_disk(local_path)
+    else:
+        ds = load_dataset("truthful_qa", "generation", split="validation")
     samples = list(ds)[:max_samples]
 
     prompts = [
@@ -364,7 +368,8 @@ def main():
         all_metrics.update(alpaca_scores)
 
     if do_tqa:
-        tqa_scores = eval_truthfulqa(model, tokenizer, args)
+        tqa_local = cfg.get("dataset", {}).get("truthfulqa_local_path")
+        tqa_scores = eval_truthfulqa(model, tokenizer, args, local_path=tqa_local)
         all_metrics.update(tqa_scores)
         logger.info(f"TruthfulQA accuracy: {tqa_scores['truthfulqa/accuracy']:.4f}")
 
