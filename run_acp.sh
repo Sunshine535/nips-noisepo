@@ -2,9 +2,9 @@
 # ============================================================================
 # NaCPO ACP Training — Startup Script
 #
-# Container has: PyTorch 2.3.0, CUDA 12.4, DeepSpeed 0.14.2, TRL 0.9.4,
-#                PEFT 0.11.1, Transformers 4.41.2, Datasets 2.19.2
-# Only sentence-transformers is missing -> install system-wide (no --target).
+# Custom image: nacpo-train:v1.0-torch2.4.1
+#   PyTorch 2.4.1+cu124, Transformers 5.3.0, TRL 0.29.1, PEFT 0.18.1,
+#   DeepSpeed 0.18.8, SentenceTransformers 5.3.0, Accelerate 1.13.0
 #
 # Startup command:
 #   bash /data/szs/250010072/nwh/nips-noisepo/run_acp.sh
@@ -25,20 +25,6 @@ echo " NaCPO ACP Training"
 echo " $(date) | $(hostname)"
 echo " GPUs: ${SENSECORE_ACCELERATE_DEVICE_COUNT:-unknown}"
 echo "============================================"
-
-# ========== UPGRADE PACKAGES FOR QWEN3.5 SUPPORT ==========
-# Container has transformers 4.41.2 which doesn't know qwen3_5 arch.
-# Upgrade HF stack together to stay compatible. Torch 2.3.0 is kept.
-MARKER=/data/szs/250010072/nwh/.acp_pkg_done_v3
-if [ ! -f "${MARKER}" ]; then
-    echo "[env] Upgrading HF packages for Qwen3.5 support..."
-    pip install --upgrade transformers trl peft accelerate datasets \
-        sentence-transformers 2>&1 | tail -15
-    touch "${MARKER}"
-    echo "[env] Done."
-else
-    echo "[env] Packages already upgraded."
-fi
 
 export HF_ENDPOINT="https://hf-mirror.com"
 export HF_HOME="${DATA_DIR}/hf_cache"

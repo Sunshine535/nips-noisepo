@@ -1,0 +1,44 @@
+# ===========================================================================
+# NaCPO Training Image — Slim build
+#
+# Uses python:3.10-slim base (~50MB) + pip install everything.
+# Avoids large Docker blob downloads by delegating to pip's retry logic.
+# PyTorch cu124 wheels bundle CUDA runtime + cuDNN + NCCL.
+#
+# Build:
+#   podman build -t nacpo-train:v1.0 -f docker/Dockerfile.slim .
+# ===========================================================================
+FROM docker.io/python:3.10-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git gcc g++ make && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+RUN pip install --no-cache-dir \
+    "deepspeed>=0.18.0" \
+    "transformers>=4.46.0" \
+    "trl>=0.12.0" \
+    "peft>=0.13.0" \
+    "accelerate>=0.34.0" \
+    "datasets>=2.21.0" \
+    "sentence-transformers" \
+    "evaluate>=0.4.0" \
+    "scipy>=1.14.0" \
+    "pyyaml>=6.0.1" \
+    "matplotlib>=3.9.0" \
+    "pandas>=2.2.0" \
+    "wandb>=0.18.0"
+
+RUN python -c "\
+import torch; \
+print(f'PyTorch {torch.__version__}, CUDA support: {torch.version.cuda}'); \
+import transformers; print(f'Transformers {transformers.__version__}'); \
+import trl; print(f'TRL {trl.__version__}'); \
+import peft; print(f'PEFT {peft.__version__}'); \
+import deepspeed; print(f'DeepSpeed {deepspeed.__version__}'); \
+import sentence_transformers; print(f'SentenceTransformers {sentence_transformers.__version__}'); \
+print('All packages OK')"

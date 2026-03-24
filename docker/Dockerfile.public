@@ -1,0 +1,39 @@
+# ===========================================================================
+# NaCPO Training Image — Fallback using public PyTorch base
+#
+# Use this if you CANNOT pull the ACP base image from the registry.
+# Based on official PyTorch 2.4.1 + CUDA 12.4
+#
+# Build:
+#   docker build -t nacpo-train:latest -f docker/Dockerfile.public .
+# ===========================================================================
+FROM docker.io/pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    "deepspeed>=0.14.2" \
+    "transformers>=4.46.0" \
+    "trl>=0.12.0" \
+    "peft>=0.13.0" \
+    "accelerate>=0.34.0" \
+    "datasets>=2.21.0" \
+    "sentence-transformers" \
+    "evaluate>=0.4.0" \
+    "scipy>=1.14.0" \
+    "pyyaml>=6.0.1" \
+    "matplotlib>=3.9.0" \
+    "pandas>=2.2.0" \
+    "wandb>=0.18.0"
+
+RUN python -c "\
+import torch; \
+print(f'PyTorch {torch.__version__}, CUDA support: {torch.version.cuda}'); \
+import transformers; print(f'Transformers {transformers.__version__}'); \
+import trl; print(f'TRL {trl.__version__}'); \
+import peft; print(f'PEFT {peft.__version__}'); \
+import deepspeed; print(f'DeepSpeed {deepspeed.__version__}'); \
+import sentence_transformers; print(f'SentenceTransformers {sentence_transformers.__version__}'); \
+print('All packages OK')"

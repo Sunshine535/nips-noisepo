@@ -17,7 +17,7 @@ WORKSPACE="share_space_01g"
 CLUSTER="computing_cluster"
 PROJECT_DIR="/data/szs/250010072/nwh/nips-noisepo"
 
-CONTAINER_IMAGE="registry.cn-sh-01.sensecore.cn/lepton-trainingjob/nvidia24.04-ubuntu22.04-py3.10-cuda12.4-cudnn9.1-torch2.3.0-transformerengine1.5:v1.0.0-20241130-nvdia-base-image"
+CONTAINER_IMAGE="registry.cn-sh-01.sensecore.cn/ccr-zhicheng-01/nacpo-train:v1.0-torch2.4.1"
 
 echo "Submitting: ${GPU_NUMS}x N6IS-80G"
 
