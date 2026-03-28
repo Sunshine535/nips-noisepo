@@ -22,8 +22,6 @@ echo "=== [2/4] Installing project dependencies ==="
 pip install transformers datasets accelerate numpy scipy matplotlib tqdm \
     pandas pyyaml huggingface_hub trl peft evaluate wandb \
     deepspeed bitsandbytes sentence-transformers rich hydra-core \
-    -i https://mirrors.aliyun.com/pypi/simple/ \
-    --trusted-host mirrors.aliyun.com
 
 echo "=== [3/4] Creating data directory ==="
 mkdir -p ${DATA_DIR}/models

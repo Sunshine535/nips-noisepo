@@ -45,7 +45,7 @@ log "========================================="
 
 python -c "
 import os, time
-os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
+os.environ.setdefault('HF_ENDPOINT', os.environ.get('HF_ENDPOINT', 'https://huggingface.co'))
 from datasets import load_dataset
 
 print('Loading UltraFeedback (primary training set)...')

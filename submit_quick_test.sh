@@ -13,7 +13,7 @@ SHARE_DIR=/data/szs/share
 source ${CONDA_BASE}/bin/activate
 conda activate ${ENV_NAME}
 
-export HF_ENDPOINT="https://hf-mirror.com"
+# HF_ENDPOINT removed (use default huggingface.co)
 export HF_HOME="${DATA_DIR}/hf_cache"
 mkdir -p "${HF_HOME}"
 

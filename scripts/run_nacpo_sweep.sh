@@ -13,7 +13,7 @@ _PROJ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -f "$_PROJ_ROOT/.venv/bin/activate" ]; then source "$_PROJ_ROOT/.venv/bin/activate"; fi
 export PATH="$HOME/.local/bin:$PATH"
 
-export HF_ENDPOINT="https://hf-mirror.com"
+# HF_ENDPOINT removed (use default huggingface.co)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"

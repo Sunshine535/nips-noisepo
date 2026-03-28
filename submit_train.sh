@@ -33,7 +33,7 @@ EMBEDDING_MODEL_PATH="${SHARE_DIR}/all-MiniLM-L6-v2"
 source ${CONDA_BASE}/bin/activate
 conda activate ${ENV_NAME}
 
-export HF_ENDPOINT="https://hf-mirror.com"
+# HF_ENDPOINT removed (use default huggingface.co)
 export HF_HOME="${DATA_DIR}/hf_cache"
 export CUDA_VISIBLE_DEVICES=$(seq -s, 0 $((GPU_NUMS-1)))
 export NCCL_P2P_DISABLE=0

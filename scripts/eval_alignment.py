@@ -26,7 +26,6 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.qwen35_compat import apply_qwen35_text_only_patch, patch_model_instance
 
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 apply_qwen35_text_only_patch()
 
 logging.basicConfig(
@@ -320,7 +319,6 @@ def eval_truthfulqa(model, tokenizer, args, max_samples=817, local_path=None):
 def main():
     args = parse_args()
     cfg = load_config(args.config)
-    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
     os.makedirs(args.output_dir, exist_ok=True)
 
     do_mt = args.eval_mt_bench or args.eval_all

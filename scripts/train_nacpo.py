@@ -35,7 +35,6 @@ from src.qwen35_compat import (
     apply_qwen35_text_only_patch, patch_model_instance, ClearRopeDeltasCallback,
 )
 
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 apply_qwen35_text_only_patch()
 
 logging.basicConfig(
