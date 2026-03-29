@@ -11,6 +11,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=gpu_utils.sh
 source "${SCRIPT_DIR}/gpu_utils.sh"
 auto_setup
+TORCHRUN=$(get_torchrun_cmd)
 
 # --- Activate project venv (created by setup.sh) ---
 PROJ_DIR_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -18,6 +19,17 @@ if [ -f "$PROJ_DIR_ROOT/.venv/bin/activate" ]; then
     source "$PROJ_DIR_ROOT/.venv/bin/activate"
 fi
 export PATH="$HOME/.local/bin:$PATH"
+
+PHASE_MARKER_DIR="$PROJ_DIR_ROOT/results/.phase_markers"
+mkdir -p "$PHASE_MARKER_DIR"
+FORCE_RERUN="${FORCE_RERUN:-0}"
+
+phase_done() { touch "$PHASE_MARKER_DIR/phase_${1}.done"; echo "[PHASE $1] Completed at $(date)"; }
+is_phase_done() {
+    [[ "$FORCE_RERUN" == "1" ]] && return 1
+    [[ -f "$PHASE_MARKER_DIR/phase_${1}.done" ]] && echo "[PHASE $1] Already completed. Skipping. (FORCE_RERUN=1 to override)" && return 0
+    return 1
+}
 
 CONFIG="${PROJECT_DIR}/configs/nacpo_configs.yaml"
 
@@ -39,6 +51,7 @@ log "========================================="
 # ============================================================================
 # Stage 1: Prepare Data (verify dataset access)
 # ============================================================================
+if ! is_phase_done 1; then
 log "========================================="
 log "[Stage 1/6] Preparing data"
 log "========================================="
@@ -69,20 +82,26 @@ for attempt in range(3):
 
 print('Data preparation complete.')
 " 2>&1 | tee "${LOG_DIR}/stage1_data_prep.log"
+phase_done 1
+fi
 
 # ============================================================================
 # Stage 2: Run full NaCPO sweep (baselines + 36 configs + second seeds)
 # ============================================================================
+if ! is_phase_done 2; then
 log "========================================="
 log "[Stage 2/6] Running NaCPO sweep"
 log "========================================="
 
 bash "${SCRIPT_DIR}/run_nacpo_sweep.sh" \
     2>&1 | tee "${LOG_DIR}/stage2_sweep.log"
+phase_done 2
+fi
 
 # ============================================================================
 # Stage 3: Comprehensive Evaluation
 # ============================================================================
+if ! is_phase_done 3; then
 log "========================================="
 log "[Stage 3/6] Comprehensive evaluation"
 log "========================================="
@@ -109,10 +128,13 @@ for CKPT_DIR in "${CHECKPOINT_DIR}"/*/; do
         continue
     }
 done
+phase_done 3
+fi
 
 # ============================================================================
 # Stage 4: Noise Analysis
 # ============================================================================
+if ! is_phase_done 4; then
 log "========================================="
 log "[Stage 4/6] Noise analysis"
 log "========================================="
@@ -123,10 +145,13 @@ python "${SCRIPT_DIR}/run_noise_analysis.py" \
     --output_dir "$ANALYSIS_DIR" \
     --noise_rates 0.05 0.1 0.15 0.2 0.25 0.3 \
     2>&1 | tee "${LOG_DIR}/stage4_noise_analysis.log"
+phase_done 4
+fi
 
 # ============================================================================
 # Stage 5: 27B Validation (best config only)
 # ============================================================================
+if ! is_phase_done 5; then
 log "========================================="
 log "[Stage 5/6] 27B validation (if GPU memory allows)"
 log "========================================="
@@ -153,10 +178,13 @@ if [ -n "$BEST_CONFIG" ]; then
 else
     log "No ranking available yet. Run evaluation first."
 fi
+phase_done 5
+fi
 
 # ============================================================================
 # Stage 6: Summary
 # ============================================================================
+if ! is_phase_done 6; then
 log "========================================="
 log "[Stage 6/6] Final summary"
 log "========================================="
@@ -195,6 +223,8 @@ else:
 n_files = len(glob.glob(os.path.join(results_dir, 'eval_alignment_*.json')))
 print(f'\\nTotal evaluated: {n_files} configurations')
 "
+phase_done 6
+fi
 
 log "========================================="
 log "NaCPO experiment pipeline complete!"

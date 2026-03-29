@@ -10,6 +10,7 @@ Saves checkpoints + training metrics.
 """
 
 import argparse
+import glob
 import json
 import logging
 import os
@@ -44,6 +45,13 @@ logging.basicConfig(
 logger = logging.getLogger("train_nacpo")
 
 
+def find_latest_checkpoint(output_dir):
+    """Find the latest checkpoint directory in output_dir."""
+    ckpts = sorted(glob.glob(os.path.join(output_dir, "checkpoint-*")),
+                   key=lambda x: int(x.split("-")[-1]) if x.split("-")[-1].isdigit() else 0)
+    return ckpts[-1] if ckpts else None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="NaCPO: Noise-as-Curriculum DPO Training")
     parser.add_argument("--config", type=str, default="configs/nacpo_configs.yaml")
@@ -71,6 +79,8 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--deepspeed", type=str, default=None,
                         help="DeepSpeed config JSON path for multi-GPU training")
+    parser.add_argument("--resume_from_checkpoint", type=str, default="auto",
+                        help="Resume from checkpoint. 'auto' finds latest, path for specific, 'none' to disable")
     parser.add_argument("--local_rank", type=int, default=-1)
     return parser.parse_args()
 
@@ -340,8 +350,17 @@ def main():
         callbacks=callbacks,
     )
 
+    resume_ckpt = None
+    if args.resume_from_checkpoint != "none":
+        if args.resume_from_checkpoint == "auto":
+            resume_ckpt = find_latest_checkpoint(output_dir)
+        else:
+            resume_ckpt = args.resume_from_checkpoint
+        if resume_ckpt:
+            logger.info("Resuming from checkpoint: %s", resume_ckpt)
+
     logger.info("Starting DPO training...")
-    train_result = trainer.train()
+    train_result = trainer.train(resume_from_checkpoint=resume_ckpt)
 
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
