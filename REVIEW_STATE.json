@@ -1,0 +1,8 @@
+{
+  "score": 3,
+  "status": "reviewed",
+  "ready_for_results": false,
+  "updated_at": "2026-03-31",
+  "review_file": "AUTO_REVIEW.md",
+  "summary": "The repository has a workable experiment scaffold, but the core curriculum wiring, benchmark fidelity, and sweep orchestration are not reliable enough for trustworthy NeurIPS-grade results."
+}
