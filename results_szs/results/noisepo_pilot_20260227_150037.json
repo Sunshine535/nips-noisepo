@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "timestamp_utc": "20260227_150037",
+    "input_csv": "methods/01_adathink/results/per_sample_Qwen3_8B_20260227_140410.csv",
+    "train_size": 160,
+    "test_size": 40,
+    "lambda_cost": 0.15,
+    "seed": 17
+  },
+  "rows": [
+    {
+      "noise_eta": 0.0,
+      "standard": {
+        "accuracy": 0.525,
+        "avg_tokens": 43.25,
+        "avg_utility": 0.499658203125
+      },
+      "robust": {
+        "accuracy": 0.525,
+        "avg_tokens": 43.25,
+        "avg_utility": 0.499658203125
+      },
+      "delta_utility": 0.0,
+      "delta_accuracy": 0.0
+    },
+    {
+      "noise_eta": 0.1,
+      "standard": {
+        "accuracy": 0.525,
+        "avg_tokens": 43.25,
+        "avg_utility": 0.499658203125
+      },
+      "robust": {
+        "accuracy": 0.525,
+        "avg_tokens": 43.25,
+        "avg_utility": 0.499658203125
+      },
+      "delta_utility": 0.0,
+      "delta_accuracy": 0.0
+    },
+    {
+      "noise_eta": 0.2,
+      "standard": {
+        "accuracy": 0.525,
+        "avg_tokens": 43.25,
+        "avg_utility": 0.499658203125
+      },
+      "robust": {
+        "accuracy": 0.525,
+        "avg_tokens": 43.25,
+        "avg_utility": 0.499658203125
+      },
+      "delta_utility": 0.0,
+      "delta_accuracy": 0.0
+    },
+    {
+      "noise_eta": 0.3,
+      "standard": {
+        "accuracy": 0.475,
+        "avg_tokens": 34.2,
+        "avg_utility": 0.4549609375000001
+      },
+      "robust": {
+        "accuracy": 0.475,
+        "avg_tokens": 34.2,
+        "avg_utility": 0.4549609375000001
+      },
+      "delta_utility": 0.0,
+      "delta_accuracy": 0.0
+    },
+    {
+      "noise_eta": 0.4,
+      "standard": {
+        "accuracy": 0.475,
+        "avg_tokens": 34.2,
+        "avg_utility": 0.4549609375000001
+      },
+      "robust": {
+        "accuracy": 0.45,
+        "avg_tokens": 30.85,
+        "avg_utility": 0.4319238281250001
+      },
+      "delta_utility": -0.02303710937500003,
+      "delta_accuracy": -0.024999999999999967
+    }
+  ]
+}
