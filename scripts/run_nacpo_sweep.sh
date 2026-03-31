@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG="${NACPO_CONFIG:-${PROJECT_DIR}/configs/nacpo_configs.yaml}"
 
-NACPO_DATA_DIR="${NACPO_DATA_DIR:-/data/szs/share/noisepo}"
+NACPO_DATA_DIR="${NACPO_DATA_DIR:-${PROJECT_DIR}}"
 CHECKPOINT_DIR="${NACPO_DATA_DIR}/checkpoints"
 RESULTS_DIR="${NACPO_DATA_DIR}/results"
 LOG_DIR="${NACPO_DATA_DIR}/logs"
@@ -118,10 +118,10 @@ for seed in "${SEEDS[@]}"; do
     run_train "baseline_dpo_seed${seed}" "none" "none" "0.0" "$seed"
 done
 
-# DPO + label smoothing (beta=0.05, small uniform noise as proxy)
+# DPO + label smoothing (smooth labels toward 0.5)
 for seed in "${SEEDS[@]}"; do
-    run_train "baseline_label_smooth_seed${seed}" "uniform" "random_flip" "0.02" "$seed" \
-        "--beta 0.05"
+    run_train "baseline_label_smooth_seed${seed}" "none" "none" "0.0" "$seed" \
+        "--label_smoothing 0.1"
 done
 
 # SimPO-style (higher beta, no noise)
@@ -130,10 +130,10 @@ for seed in "${SEEDS[@]}"; do
         "--beta 0.3"
 done
 
-# IPO-style (loss_type change handled at eval, train with beta=0.5)
+# IPO-style (use IPO loss type with beta=0.5)
 for seed in "${SEEDS[@]}"; do
     run_train "baseline_ipo_seed${seed}" "none" "none" "0.0" "$seed" \
-        "--beta 0.5"
+        "--beta 0.5 --loss_type ipo"
 done
 
 # ============================================================================
@@ -204,10 +204,10 @@ for tag, score in ranked[:12]:
 if [ -n "$TOP_CONFIGS" ]; then
     log "Running seed=43 for top configs"
     while IFS= read -r config; do
-        parts=(${config//_/ })
-        schedule="${parts[0]}"
-        noise_type="${parts[1]}"
-        noise_rate="${config##*nr}"
+        noise_rate="${config##*_nr}"
+        base="${config%_nr*}"
+        schedule="${base%%_*}"
+        noise_type="${base#*_}"
 
         TAG="${config}_seed43"
         run_train "$TAG" "$schedule" "$noise_type" "$noise_rate" 43

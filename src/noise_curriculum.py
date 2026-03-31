@@ -200,6 +200,7 @@ class SemanticSwapInjector(NoiseInjector):
         self._encoder = None
         self._response_pool = []
         self._embeddings = None
+        self._fallback_warned = False
 
     def build_pool(self, responses: list[str]):
         """Pre-compute embeddings for a pool of responses."""
@@ -209,7 +210,11 @@ class SemanticSwapInjector(NoiseInjector):
                 from sentence_transformers import SentenceTransformer
                 self._encoder = SentenceTransformer(self.embedding_model_name)
             except ImportError:
-                logger.warning("sentence-transformers not installed, using random swap fallback")
+                logger.warning(
+                    "sentence-transformers not installed; semantic_swap will "
+                    "fall back to random flip for ALL samples. Install with: "
+                    "pip install sentence-transformers"
+                )
                 self._encoder = None
                 return
 
@@ -238,7 +243,18 @@ class SemanticSwapInjector(NoiseInjector):
         if similar is not None:
             return chosen, similar, True
 
-        # Fallback: just flip
+        if self._encoder is None:
+            if not self._fallback_warned:
+                logger.warning(
+                    "SemanticSwapInjector: encoder unavailable, falling back to "
+                    "random flip. This changes the effective noise type."
+                )
+                self._fallback_warned = True
+        else:
+            logger.warning(
+                "SemanticSwapInjector: no similar candidate found for input, "
+                "falling back to random flip for this sample."
+            )
         return rejected, chosen, True
 
 

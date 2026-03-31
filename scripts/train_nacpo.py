@@ -76,6 +76,10 @@ def parse_args():
     parser.add_argument("--gradient_accumulation_steps", type=int, default=None)
     parser.add_argument("--max_train_samples", type=int, default=None)
     parser.add_argument("--beta", type=float, default=None, help="DPO beta parameter")
+    parser.add_argument("--loss_type", type=str, default=None,
+                        help="DPO loss type (sigmoid, ipo, etc.). Overrides config.")
+    parser.add_argument("--label_smoothing", type=float, default=0.0,
+                        help="Label smoothing factor for DPO (0=none, >0 smooths toward 0.5)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--deepspeed", type=str, default=None,
                         help="DeepSpeed config JSON path for multi-GPU training")
@@ -258,6 +262,7 @@ def main():
     tcfg = cfg["training"]
     callbacks = []
     actual_flip_rate = 0.0
+    data_collator = None
 
     if not is_baseline:
         sched_key = args.noise_schedule
@@ -302,6 +307,7 @@ def main():
             * (args.num_train_epochs or tcfg["num_train_epochs"])
         )
         collator.set_training_steps(total_steps)
+        data_collator = collator
         callbacks.append(NaCPOCallback(collator, args.warmup_steps))
 
     dpo_kwargs = dict(
@@ -319,7 +325,8 @@ def main():
         save_steps=tcfg["save_steps"],
         save_total_limit=1,
         beta=args.beta or tcfg["beta"],
-        loss_type=tcfg["loss_type"],
+        loss_type=args.loss_type or tcfg["loss_type"],
+        label_smoothing=args.label_smoothing,
         max_length=tcfg["max_length"],
         seed=args.seed,
         report_to="none",
@@ -348,6 +355,7 @@ def main():
         processing_class=tokenizer,
         peft_config=peft_config,
         callbacks=callbacks,
+        data_collator=data_collator,
     )
 
     resume_ckpt = None

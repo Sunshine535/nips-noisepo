@@ -73,7 +73,7 @@ for seed in "${SEEDS[@]}"; do
     deepspeed --num_gpus $NUM_GPUS \
         "${SCRIPT_DIR}/train_nacpo.py" \
         --config "$CONFIG" \
-        --schedule none \
+        --noise_schedule none \
         --noise_type none \
         --seed "$seed" \
         --output_dir "$OUTPUT" \
@@ -107,7 +107,7 @@ for schedule in "${SCHEDULES[@]}"; do
             deepspeed --num_gpus $NUM_GPUS \
                 "${SCRIPT_DIR}/train_nacpo.py" \
                 --config "$CONFIG" \
-                --schedule "$schedule" \
+                --noise_schedule "$schedule" \
                 --noise_type "$noise_type" \
                 --seed "$seed" \
                 --output_dir "$OUTPUT" \
