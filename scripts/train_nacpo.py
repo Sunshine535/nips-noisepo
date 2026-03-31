@@ -149,10 +149,8 @@ def prepare_preference_data(dataset_name, split, max_samples=None, tokenizer=Non
 
         if use_chat:
             prompt_msgs = [{"role": "user", "content": prompt}]
-            chosen_msgs = [{"role": "user", "content": prompt},
-                           {"role": "assistant", "content": chosen}]
-            rejected_msgs = [{"role": "user", "content": prompt},
-                             {"role": "assistant", "content": rejected}]
+            chosen_msgs = [{"role": "assistant", "content": chosen}]
+            rejected_msgs = [{"role": "assistant", "content": rejected}]
             processed.append({
                 "prompt": prompt_msgs,
                 "chosen": chosen_msgs,
@@ -288,12 +286,6 @@ def main():
             logger.info("Building semantic swap response pool...")
             pool = [ex["chosen"] for ex in dataset] + [ex["rejected"] for ex in dataset]
             injector.build_pool(pool[:5000])
-
-        warmup_fraction = args.warmup_steps / max(len(dataset), 1) if args.warmup_steps > 0 else 0.0
-
-        dataset, actual_flip_rate = inject_noise_into_dataset(
-            dataset, schedule, injector, args.noise_type, args.seed, warmup_fraction,
-        )
 
         collator = NoisyCurriculumCollator(
             tokenizer=tokenizer, schedule=schedule, injector=injector,

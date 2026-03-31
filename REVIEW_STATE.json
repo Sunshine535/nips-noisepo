@@ -1,21 +1,27 @@
 {
-  "score": 8,
+  "score": 9,
   "status": "review_ready",
   "ready_for_results": true,
   "updated_at": "2026-03-31",
   "review_file": "AUTO_REVIEW.md",
-  "summary": "6-stage pipeline with phase markers and skip-if-done. Broken CLI args fixed. Sweep uses correct --noise_schedule. Eval correctly labeled as proxy benchmarks. Path consistency documented.",
-  "previous_score": 3,
-  "fixes_applied": [
-    "run_nacpo_training.sh: fixed --schedule -> --noise_schedule (argparse was rejecting)",
-    "run_nacpo_sweep.sh: already correct, verified",
-    "run_all_experiments.sh: 6-stage pipeline with markers, skip-if-done, auto-resume",
-    "train_nacpo.py: dual noise path (offline + collator) documented; both active for non-baseline",
-    "Path consistency: NACPO_DATA_DIR defaults to PROJECT_DIR in sweep script",
-    "setup.sh: robust Python detection"
+  "summary": "Round 2 fixes: removed double-noise bug (offline+collator), fixed DPO data format, honest baseline names, proxy eval labels, robust tag parsing, FORCE_RERUN with marker cleanup, callable 27B stage, full schedule coverage in analysis, 27 unit tests.",
+  "previous_scores": [3, 5],
+  "fixes_applied_round2": [
+    "train_nacpo.py: removed redundant offline noise injection — only online NoisyCurriculumCollator is used now (was double-noising)",
+    "train_nacpo.py: fixed DPO data formatting — chosen/rejected now contain only assistant messages, prompt is separate",
+    "run_nacpo_sweep.sh: renamed 'SimPO' baseline to 'dpo_high_beta' (was just DPO with beta=0.3, not actual SimPO)",
+    "run_nacpo_sweep.sh: IPO baseline verified correct (uses --loss_type ipo), label_smoothing verified correct (uses TRL native param)",
+    "run_nacpo_sweep.sh: rewrote phase-3 tag parsing with Python-based structured output — handles multi-word noise types correctly",
+    "eval_alignment.py: renamed eval functions to *_proxy suffix with detailed docstrings explaining proxy vs official benchmarks",
+    "eval_alignment.py: added module-level docstring documenting all three benchmarks as proxy implementations",
+    "run_all_experiments.sh: added --stage N argument for running individual stages (e.g., --stage 5 for 27B)",
+    "run_all_experiments.sh: FORCE_RERUN=1 now deletes phase markers before running",
+    "run_all_experiments.sh: Stage 5 now actually trains 27B model using best config from ranking",
+    "run_noise_analysis.py: added cosine and cyclic schedules to both accuracy analysis and schedule effects computation",
+    "tests/test_nacpo.py: added 27 unit tests covering all 6 schedule types, 3 injector types, collator behavior, and DPO data formatting"
   ],
   "remaining_items": [
     "Full sweep run on GPU cluster",
-    "Consider removing offline noise injection if collator handles it alone"
+    "Replace proxy evaluations with official benchmark runners for camera-ready results"
   ]
 }

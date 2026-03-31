@@ -24,6 +24,26 @@ PHASE_MARKER_DIR="$PROJ_DIR_ROOT/results/.phase_markers"
 mkdir -p "$PHASE_MARKER_DIR"
 FORCE_RERUN="${FORCE_RERUN:-0}"
 
+# Parse CLI arguments
+TARGET_STAGE=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --stage) TARGET_STAGE="$2"; shift 2 ;;
+        *) echo "Unknown argument: $1. Usage: $0 [--stage N]"; exit 1 ;;
+    esac
+done
+
+should_run_stage() {
+    [[ -z "$TARGET_STAGE" ]] && return 0
+    [[ "$TARGET_STAGE" == "$1" ]] && return 0
+    return 1
+}
+
+if [[ "$FORCE_RERUN" == "1" ]]; then
+    echo "[FORCE_RERUN] Deleting all phase markers"
+    rm -f "$PHASE_MARKER_DIR"/*.done
+fi
+
 phase_done() { touch "$PHASE_MARKER_DIR/phase_${1}.done"; echo "[PHASE $1] Completed at $(date)"; }
 is_phase_done() {
     [[ "$FORCE_RERUN" == "1" ]] && return 1
@@ -51,7 +71,7 @@ log "========================================="
 # ============================================================================
 # Stage 1: Prepare Data (verify dataset access)
 # ============================================================================
-if ! is_phase_done 1; then
+if should_run_stage 1 && ! is_phase_done 1; then
 log "========================================="
 log "[Stage 1/6] Preparing data"
 log "========================================="
@@ -88,7 +108,7 @@ fi
 # ============================================================================
 # Stage 2: Run full NaCPO sweep (baselines + 36 configs + second seeds)
 # ============================================================================
-if ! is_phase_done 2; then
+if should_run_stage 2 && ! is_phase_done 2; then
 log "========================================="
 log "[Stage 2/6] Running NaCPO sweep"
 log "========================================="
@@ -101,7 +121,7 @@ fi
 # ============================================================================
 # Stage 3: Comprehensive Evaluation
 # ============================================================================
-if ! is_phase_done 3; then
+if should_run_stage 3 && ! is_phase_done 3; then
 log "========================================="
 log "[Stage 3/6] Comprehensive evaluation"
 log "========================================="
@@ -134,7 +154,7 @@ fi
 # ============================================================================
 # Stage 4: Noise Analysis
 # ============================================================================
-if ! is_phase_done 4; then
+if should_run_stage 4 && ! is_phase_done 4; then
 log "========================================="
 log "[Stage 4/6] Noise analysis"
 log "========================================="
@@ -151,32 +171,74 @@ fi
 # ============================================================================
 # Stage 5: 27B Validation (best config only)
 # ============================================================================
-if ! is_phase_done 5; then
+if should_run_stage 5 && ! is_phase_done 5; then
 log "========================================="
 log "[Stage 5/6] 27B validation (if GPU memory allows)"
 log "========================================="
 
-BEST_CONFIG=$(python -c "
+BEST_INFO=$(python -c "
 import json, os
 
+KNOWN_SCHEDULES = {'uniform', 'ascending', 'descending', 'cosine', 'cyclic', 'adversarial'}
+
 ranking_file = '${ANALYSIS_DIR}/robustness_ranking.json'
-if os.path.exists(ranking_file):
-    with open(ranking_file) as f:
-        ranking = json.load(f)
-    for name, data in ranking.items():
-        if 'baseline' not in name and data.get('truthfulqa_mean'):
-            print(name)
+if not os.path.exists(ranking_file):
+    exit(0)
+with open(ranking_file) as f:
+    ranking = json.load(f)
+for name, data in ranking.items():
+    if 'baseline' in name or not data.get('truthfulqa_mean'):
+        continue
+    nr_idx = name.rfind('_nr')
+    if nr_idx < 0:
+        continue
+    noise_rate = name[nr_idx + 3:]
+    prefix = name[:nr_idx]
+    for s in KNOWN_SCHEDULES:
+        if prefix == s or prefix.startswith(s + '_'):
+            schedule = s
+            noise_type = prefix[len(s) + 1:] if len(prefix) > len(s) else ''
+            if noise_type:
+                print(f'{name} {schedule} {noise_type} {noise_rate}')
             break
-else:
-    print('')
+    else:
+        continue
+    break
 " 2>/dev/null || echo "")
 
-if [ -n "$BEST_CONFIG" ]; then
+if [ -n "$BEST_INFO" ]; then
+    read -r BEST_CONFIG BEST_SCHEDULE BEST_NOISE_TYPE BEST_NOISE_RATE <<< "$BEST_INFO"
     log "Best NaCPO config: $BEST_CONFIG"
-    log "NOTE: 27B validation requires manual launch with larger GPU allocation."
-    log "Command: python scripts/train_nacpo.py --model_name Qwen/Qwen3.5-27B ..."
+    log "  schedule=$BEST_SCHEDULE type=$BEST_NOISE_TYPE rate=$BEST_NOISE_RATE"
+
+    OUTPUT_27B="${CHECKPOINT_DIR}/27b_validation_${BEST_CONFIG}"
+    if [ -f "${OUTPUT_27B}/train_metrics.json" ]; then
+        log "27B training already complete: $OUTPUT_27B"
+    else
+        log "Launching 27B validation training..."
+        ${TORCHRUN} "${SCRIPT_DIR}/train_nacpo.py" \
+            --config "$CONFIG" \
+            --model_name "Qwen/Qwen3.5-27B" \
+            --noise_schedule "$BEST_SCHEDULE" \
+            --noise_type "$BEST_NOISE_TYPE" \
+            --noise_rate "$BEST_NOISE_RATE" \
+            --output_dir "$OUTPUT_27B" \
+            --seed 42 \
+            2>&1 | tee "${LOG_DIR}/stage5_27b_train.log"
+    fi
+
+    if [ -d "$OUTPUT_27B" ] && [ ! -f "${RESULTS_DIR}/eval_alignment_27b_validation.json" ]; then
+        log "Evaluating 27B checkpoint..."
+        python "${SCRIPT_DIR}/eval_alignment.py" \
+            --config "$CONFIG" \
+            --checkpoint_dir "$OUTPUT_27B" \
+            --output_dir "$RESULTS_DIR" \
+            --tag "27b_validation_${BEST_CONFIG}" \
+            --eval_all \
+            2>&1 | tee "${LOG_DIR}/stage5_27b_eval.log"
+    fi
 else
-    log "No ranking available yet. Run evaluation first."
+    log "No ranking available yet. Run stages 1-4 first, or use --stage 5 after evaluation."
 fi
 phase_done 5
 fi
@@ -184,7 +246,7 @@ fi
 # ============================================================================
 # Stage 6: Summary
 # ============================================================================
-if ! is_phase_done 6; then
+if should_run_stage 6 && ! is_phase_done 6; then
 log "========================================="
 log "[Stage 6/6] Final summary"
 log "========================================="

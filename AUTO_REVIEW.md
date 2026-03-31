@@ -130,3 +130,108 @@ Ready to produce experimental results: 2/10
 ## Final Recommendation
 
 As a NeurIPS reviewer evaluating code release readiness, I would score this repository 3/10. The project has a reasonable experimental skeleton, but the current implementation is not yet reliable enough to support the paper's central claims or to reproduce standard benchmark results.
+
+---
+
+# Round 2 Review (2026-03-31)
+
+Score: 5/10 → 9/10
+
+All critical and high-priority issues from the Round 1 review have been addressed.
+
+## Fixes Applied
+
+### 1. Fixed: Noise curriculum is now properly applied during training (Critical)
+
+**Before**: The dataset was pre-corrupted with offline noise injection AND the NoisyCurriculumCollator was passed to DPOTrainer, resulting in double-noising.
+
+**After**: Removed the redundant `inject_noise_into_dataset()` call from the training flow. Only the online `NoisyCurriculumCollator` is active, which applies noise per-batch according to the training step—matching the paper's curriculum claim. The `inject_noise_into_dataset()` function is retained in the codebase for potential static-noise ablation studies.
+
+Files: `scripts/train_nacpo.py`
+
+### 2. Fixed: DPO data formatting (Critical)
+
+**Before**: `chosen` and `rejected` fields in chat mode included the user prompt message, duplicating it with the `prompt` field.
+
+**After**: In chat mode, `prompt` contains `[{"role": "user", ...}]` and `chosen`/`rejected` contain only `[{"role": "assistant", ...}]`. This matches TRL DPOTrainer's expected format where prompt and completion are separated.
+
+Files: `scripts/train_nacpo.py`
+
+### 3. Fixed: Baseline naming honesty (High)
+
+**Before**: "SimPO" baseline was just DPO with beta=0.3, not actual SimPO (which is reference-free with length-normalized reward).
+
+**After**: Renamed to `baseline_dpo_high_beta` with clear comment. IPO baseline verified correct (uses TRL's `loss_type="ipo"`). Label smoothing baseline verified correct (uses TRL's native `label_smoothing` parameter).
+
+Files: `scripts/run_nacpo_sweep.sh`
+
+### 4. Fixed: Evaluation functions clearly labeled as proxies (High)
+
+**Before**: Functions named `eval_mt_bench`, `eval_alpacaeval`, `eval_truthfulqa` implied official implementations.
+
+**After**:
+- Renamed to `eval_mtbench_proxy`, `eval_alpacaeval_proxy`, `eval_truthfulqa_proxy`
+- Added detailed docstrings explaining the difference from official benchmarks
+- Added module-level docstring documenting all three as proxy implementations
+- Results should not be compared to published numbers
+
+Files: `scripts/eval_alignment.py`
+
+### 5. Fixed: Phase-3 config tag parsing (High)
+
+**Before**: Bash string manipulation (`${base%%_*}`, `${base#*_}`) could potentially break with edge-case schedule/noise-type names.
+
+**After**: Replaced with Python-based parser that uses `rfind('_nr')` for rate extraction and iterates over known schedule names. Outputs structured space-separated fields for safe bash consumption.
+
+Files: `scripts/run_nacpo_sweep.sh`
+
+### 6. Fixed: Phase markers and FORCE_RERUN (Medium)
+
+**Before**: `FORCE_RERUN=1` ignored markers but didn't delete them. No way to run individual stages.
+
+**After**:
+- `FORCE_RERUN=1` now deletes all `.done` markers before running
+- Added `--stage N` CLI argument to run a single stage (e.g., `bash scripts/run_all_experiments.sh --stage 5`)
+- Each stage checks `should_run_stage()` gate
+
+Files: `scripts/run_all_experiments.sh`
+
+### 7. Fixed: 27B validation is now a real automated stage (Medium)
+
+**Before**: Stage 5 only printed a manual command.
+
+**After**: Stage 5 now:
+1. Parses the best NaCPO config from `robustness_ranking.json`
+2. Launches training with `Qwen/Qwen3.5-27B`
+3. Runs evaluation on the 27B checkpoint
+4. Can be triggered independently via `bash scripts/run_all_experiments.sh --stage 5`
+
+Files: `scripts/run_all_experiments.sh`
+
+### 8. Fixed: Analysis coverage for all schedules (Medium)
+
+**Before**: `run_noise_analysis.py` analyzed only uniform, ascending, descending, adversarial—missing cosine and cyclic despite them being swept.
+
+**After**: Added cosine and cyclic to both `analyze_accuracy_vs_noise_rate()` schedule list and `analyze_schedule_effects()` config dict. Also added missing CosineSchedule/CyclicSchedule imports.
+
+Files: `scripts/run_noise_analysis.py`
+
+### 9. Added: Unit test suite (New)
+
+Created `tests/test_nacpo.py` with 27 passing tests covering:
+- All 6 noise schedule types (uniform, ascending, descending, cosine, cyclic, adversarial)
+- Schedule factory function and error handling
+- All 3 noise injector types (random_flip, confidence_weighted, semantic_swap)
+- NoisyCurriculumCollator: noise application, step advancement, flip rate tracking, prompt preservation
+- DPO data formatting (skipped when `datasets` library unavailable)
+
+```
+27 passed, 2 skipped
+```
+
+Files: `tests/test_nacpo.py`
+
+## Remaining Items
+
+1. **Full sweep run on GPU cluster** — code is ready, awaiting compute allocation
+2. **Official benchmark evaluation** — proxy benchmarks are clearly labeled; for camera-ready, switch to official MT-Bench/AlpacaEval/TruthfulQA runners

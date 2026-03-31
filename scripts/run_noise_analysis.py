@@ -19,7 +19,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.noise_curriculum import (
-    build_schedule, UniformSchedule, AscendingSchedule, DescendingSchedule, AdversarialSchedule,
+    build_schedule, UniformSchedule, AscendingSchedule, DescendingSchedule,
+    CosineSchedule, CyclicSchedule, AdversarialSchedule,
 )
 
 logging.basicConfig(
@@ -75,7 +76,7 @@ def analyze_accuracy_vs_noise_rate(eval_results, output_dir):
     logger.info("Analyzing accuracy vs noise rate...")
 
     noise_types = ["random_flip", "confidence_weighted", "semantic_swap"]
-    schedules = ["uniform", "ascending", "descending", "adversarial"]
+    schedules = ["uniform", "ascending", "descending", "cosine", "cyclic", "adversarial"]
 
     analysis = {"by_noise_type": {}, "by_schedule": {}}
 
@@ -137,6 +138,8 @@ def analyze_schedule_effects(num_steps, noise_rates, output_dir):
             "uniform": {"type": "uniform", "noise_rate": rate},
             "ascending": {"type": "ascending", "start_rate": 0.0, "end_rate": rate},
             "descending": {"type": "descending", "start_rate": rate, "end_rate": 0.0},
+            "cosine": {"type": "cosine", "peak_rate": rate},
+            "cyclic": {"type": "cyclic", "peak_rate": rate, "num_cycles": 5},
             "adversarial": {"type": "adversarial", "base_rate": rate * 0.5,
                             "adversarial_rate": rate * 2, "adversarial_fraction": 0.2},
         }

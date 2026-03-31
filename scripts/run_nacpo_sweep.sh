@@ -124,13 +124,13 @@ for seed in "${SEEDS[@]}"; do
         "--label_smoothing 0.1"
 done
 
-# SimPO-style (higher beta, no noise)
+# DPO with higher beta (beta=0.3 vs default 0.1)
 for seed in "${SEEDS[@]}"; do
-    run_train "baseline_simpo_seed${seed}" "none" "none" "0.0" "$seed" \
+    run_train "baseline_dpo_high_beta_seed${seed}" "none" "none" "0.0" "$seed" \
         "--beta 0.3"
 done
 
-# IPO-style (use IPO loss type with beta=0.5)
+# IPO loss (TRL's built-in loss_type="ipo", tau=0.5)
 for seed in "${SEEDS[@]}"; do
     run_train "baseline_ipo_seed${seed}" "none" "none" "0.0" "$seed" \
         "--beta 0.5 --loss_type ipo"
@@ -176,7 +176,7 @@ done
 
 # Evaluate baselines
 for seed in "${SEEDS[@]}"; do
-    for base in baseline_dpo baseline_label_smooth baseline_simpo baseline_ipo; do
+    for base in baseline_dpo baseline_label_smooth baseline_dpo_high_beta baseline_ipo; do
         TAG="${base}_seed${seed}"
         run_eval "$TAG" "${CHECKPOINT_DIR}/${TAG}"
     done
@@ -186,6 +186,8 @@ done
 log "Selecting top configs for second seed..."
 TOP_CONFIGS=$(python -c "
 import json, os, glob
+
+KNOWN_SCHEDULES = {'uniform', 'ascending', 'descending', 'cosine', 'cyclic', 'adversarial'}
 
 results = {}
 for f in glob.glob('${RESULTS_DIR}/eval_alignment_*_seed42.json'):
@@ -198,18 +200,27 @@ for f in glob.glob('${RESULTS_DIR}/eval_alignment_*_seed42.json'):
 ranked = sorted(results.items(), key=lambda x: x[1], reverse=True)
 for tag, score in ranked[:12]:
     base = tag.replace('_seed42', '')
-    print(base)
+    nr_idx = base.rfind('_nr')
+    if nr_idx < 0:
+        continue
+    noise_rate = base[nr_idx + 3:]
+    prefix = base[:nr_idx]
+    schedule = noise_type = ''
+    for s in KNOWN_SCHEDULES:
+        if prefix == s or prefix.startswith(s + '_'):
+            schedule = s
+            noise_type = prefix[len(s) + 1:] if len(prefix) > len(s) else ''
+            break
+    if schedule and noise_type:
+        # Structured output: space-separated for safe bash parsing
+        print(f'{schedule} {noise_type} {noise_rate}')
 " 2>/dev/null || echo "")
 
 if [ -n "$TOP_CONFIGS" ]; then
     log "Running seed=43 for top configs"
-    while IFS= read -r config; do
-        noise_rate="${config##*_nr}"
-        base="${config%_nr*}"
-        schedule="${base%%_*}"
-        noise_type="${base#*_}"
-
-        TAG="${config}_seed43"
+    while IFS=' ' read -r schedule noise_type noise_rate; do
+        [ -z "$schedule" ] && continue
+        TAG="${schedule}_${noise_type}_nr${noise_rate}_seed43"
         run_train "$TAG" "$schedule" "$noise_type" "$noise_rate" 43
         run_eval "$TAG" "${CHECKPOINT_DIR}/${TAG}"
     done <<< "$TOP_CONFIGS"

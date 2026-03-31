@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """
-Alignment evaluation for NaCPO models.
+Alignment evaluation for NaCPO models — PROXY implementations.
 
-Benchmarks:
-  - MT-Bench (GPT-4 / local LLM judge)
-  - AlpacaEval 2.0 (length-controlled win rate proxy)
-  - TruthfulQA (MC accuracy)
-Generate and score across all trained checkpoints.
+These are lightweight proxy benchmarks for fast internal iteration.
+They are NOT faithful reproductions of the official benchmark protocols:
+
+  - MT-Bench proxy: 8 hand-crafted 2-turn questions scored by a local LLM judge,
+    vs. the official 80-question benchmark judged by GPT-4.
+  - AlpacaEval proxy: heuristic quality estimation based on length/structure,
+    vs. the official pairwise GPT-4 win-rate evaluation.
+  - TruthfulQA proxy: substring-matching against known correct/incorrect answers,
+    vs. the official MC evaluation with calibrated model probabilities.
+
+Results from these proxies should NOT be directly compared to published numbers.
+For camera-ready results, use the official benchmark implementations.
 """
 
 import argparse
@@ -157,9 +164,14 @@ def judge_response(judge_model, judge_tokenizer, question, response, device):
     return 5.0
 
 
-def eval_mt_bench(model, tokenizer, judge_model, judge_tokenizer, args):
-    """Multi-turn MT-Bench evaluation with LLM judge."""
-    logger.info(f"Running MT-Bench evaluation ({len(MT_BENCH_QUESTIONS)} questions, 2 turns each)")
+def eval_mtbench_proxy(model, tokenizer, judge_model, judge_tokenizer, args):
+    """MT-Bench PROXY: 8 hand-crafted questions scored by a local LLM judge.
+
+    This is NOT the official MT-Bench benchmark (80 questions, GPT-4 judge).
+    Use for fast internal ranking only. For paper results, use the official
+    MT-Bench evaluation from lm-sys/FastChat.
+    """
+    logger.info(f"Running MT-Bench proxy evaluation ({len(MT_BENCH_QUESTIONS)} questions, 2 turns each)")
     device = model.device
 
     all_scores = []
@@ -204,9 +216,15 @@ def eval_mt_bench(model, tokenizer, judge_model, judge_tokenizer, args):
 
 # ── AlpacaEval 2.0 ──────────────────────────────────────────────────────────
 
-def eval_alpacaeval(model, tokenizer, args, max_samples=805):
-    """AlpacaEval 2.0 proxy: length-controlled quality estimation."""
-    logger.info("Running AlpacaEval 2.0 evaluation")
+def eval_alpacaeval_proxy(model, tokenizer, args, max_samples=805):
+    """AlpacaEval PROXY: heuristic quality estimation from response length/structure.
+
+    This is NOT the official AlpacaEval 2.0 benchmark (pairwise GPT-4 win-rate).
+    The quality_proxy score is based on simple heuristics (word count, discourse
+    markers, sentence completion) and cannot be compared to official LC win rates.
+    For paper results, use the official alpaca_eval package.
+    """
+    logger.info("Running AlpacaEval proxy evaluation")
 
     try:
         ds = load_dataset("tatsu-lab/alpaca_eval", split="eval")
@@ -256,9 +274,16 @@ def eval_alpacaeval(model, tokenizer, args, max_samples=805):
 
 # ── TruthfulQA ──────────────────────────────────────────────────────────────
 
-def eval_truthfulqa(model, tokenizer, args, max_samples=817, local_path=None):
-    """TruthfulQA MC accuracy evaluation."""
-    logger.info("Running TruthfulQA evaluation")
+def eval_truthfulqa_proxy(model, tokenizer, args, max_samples=817, local_path=None):
+    """TruthfulQA PROXY: substring-matching against known correct/incorrect answers.
+
+    This is NOT the official TruthfulQA MC evaluation (calibrated log-probabilities
+    over multiple-choice options). Instead, it generates free-form responses and checks
+    for substring matches. Results are approximate and should not be compared to
+    published TruthfulQA numbers. For paper results, use the official evaluation from
+    the EleutherAI lm-evaluation-harness.
+    """
+    logger.info("Running TruthfulQA proxy evaluation")
 
     if local_path and Path(local_path).exists():
         logger.info(f"Loading TruthfulQA from disk: {local_path}")
@@ -354,7 +379,7 @@ def main():
         patch_model_instance(judge_model)
         judge_model.eval()
 
-        mt_scores = eval_mt_bench(model, tokenizer, judge_model, judge_tokenizer, args)
+        mt_scores = eval_mtbench_proxy(model, tokenizer, judge_model, judge_tokenizer, args)
         all_metrics.update(mt_scores)
         logger.info(f"MT-Bench overall: {mt_scores['mt_bench/overall']:.2f}")
 
@@ -362,12 +387,12 @@ def main():
         torch.cuda.empty_cache()
 
     if do_alpaca:
-        alpaca_scores = eval_alpacaeval(model, tokenizer, args)
+        alpaca_scores = eval_alpacaeval_proxy(model, tokenizer, args)
         all_metrics.update(alpaca_scores)
 
     if do_tqa:
         tqa_local = cfg.get("dataset", {}).get("truthfulqa_local_path")
-        tqa_scores = eval_truthfulqa(model, tokenizer, args, local_path=tqa_local)
+        tqa_scores = eval_truthfulqa_proxy(model, tokenizer, args, local_path=tqa_local)
         all_metrics.update(tqa_scores)
         logger.info(f"TruthfulQA accuracy: {tqa_scores['truthfulqa/accuracy']:.4f}")
 
